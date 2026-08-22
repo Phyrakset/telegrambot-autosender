@@ -2,7 +2,6 @@
 # Both local formats (e.g. 0968271451) and international formats (+855968271451) are supported.
 
 0968271451
-0183910978
 09342252
 087225303
 012345678
