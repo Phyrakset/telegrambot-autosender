@@ -18,7 +18,7 @@ class TelegramService:
     _instance: Optional["TelegramService"] = None
 
     def __new__(cls, *args, **kwargs):
-        # Singleton pattern to reuse the connected client session across UI calls
+        # Singleton pattern to reuse the connected client session across UI & background tasks
         if cls._instance is None:
             cls._instance = super(TelegramService, cls).__new__(cls)
             cls._instance._initialized = False
@@ -34,6 +34,7 @@ class TelegramService:
         self.client: Optional[TelegramClient] = None
         self.phone_code_hash: Optional[str] = None
         self.pending_phone: Optional[str] = None
+        self.is_stopping: bool = False
         self._initialized = True
 
     def reload_env(self):
@@ -130,6 +131,14 @@ class TelegramService:
         except Exception as e:
             return False, f"2FA verification failed: {str(e)}", True
 
+    async def delete_contact(self, user_id: int):
+        """Safely removes an imported temporary contact from Telegram contacts."""
+        try:
+            if self.client and self.client.is_connected():
+                await self.client(functions.contacts.DeleteContactsRequest(id=[types.InputUser(user_id=user_id, access_hash=0)]))
+        except Exception as e:
+            logger.debug(f"Contact cleanup exception (ignored): {e}")
+
     async def check_phone_registration(
         self, 
         phone_e164: str, 
@@ -203,6 +212,24 @@ class TelegramService:
             return False, "UserPrivacyRestrictedError: Blocked by user privacy settings"
         except Exception as e:
             return False, str(e)
+
+    def format_message_template(self, template: str, user_info: Optional[Dict[str, Any]] = None, bot_link: str = "") -> str:
+        """
+        Renders message template with optional variables:
+        - {name}: user's first name or 'Valued Customer'
+        - {username}: @username or ''
+        - {bot_link}: official bot URL
+        """
+        first_name = (user_info.get("first_name") if user_info else "") or "Valued Customer"
+        username = f"@{user_info.get('username')}" if (user_info and user_info.get("username")) else ""
+        
+        msg = template.replace("{name}", first_name).replace("{username}", username)
+        if "{bot_link}" in msg:
+            msg = msg.replace("{bot_link}", bot_link.strip())
+        elif bot_link.strip() and bot_link.strip() not in msg:
+            # If bot_link is specified but not in template, append nicely
+            msg = f"{msg.strip()}\n\n👉 Chat with our Assistant: {bot_link.strip()}"
+        return msg.strip()
 
     async def disconnect(self):
         if self.client and self.client.is_connected():
