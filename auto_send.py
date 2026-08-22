@@ -22,8 +22,7 @@ async def run_auto_send(
     phone_file: str = "phone-list.txt",
     message_template: str = DEFAULT_MESSAGE,
     default_country: str = "KH",
-    min_delay: int = 15,
-    max_delay: int = 35
+    delay_seconds: int = 2
 ):
     print(f"\n{Fore.CYAN}╔══════════════════════════════════════════════════════════════════╗")
     print(f"{Fore.CYAN}║     🚀 TELEGRAM DIRECT OUTREACH (PHONE TO PHONE SENDER)          ║")
@@ -120,11 +119,10 @@ async def run_auto_send(
                 # Clean up temporary contact
                 await service.delete_contact(info["id"])
 
-                # Anti-spam delay between sends
-                if index < total_count:
-                    delay = random.randint(min_delay, max_delay)
-                    print(f"       ⏳ Anti-flood delay: sleeping for {Fore.MAGENTA}{delay}s{Style.RESET_ALL}...\n")
-                    await asyncio.sleep(delay)
+                # Anti-flood delay between sends
+                if index < total_count and delay_seconds > 0:
+                    print(f"       ⏳ Delay: waiting {Fore.MAGENTA}{delay_seconds}s{Style.RESET_ALL} before next number...\n")
+                    await asyncio.sleep(delay_seconds)
 
             else:
                 stats["not_registered"] += 1
@@ -143,7 +141,7 @@ async def run_auto_send(
                     "timestamp": datetime.now().isoformat()
                 })
                 if index < total_count:
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(0.5)
 
         except Exception as e:
             stats["error"] += 1
@@ -202,8 +200,7 @@ if __name__ == "__main__":
     parser.add_argument("file", nargs="?", default="phone-list.txt", help="Path to phone numbers text file")
     parser.add_argument("--msg", default=DEFAULT_MESSAGE, help="Custom message text")
     parser.add_argument("--country", default=os.getenv("DEFAULT_COUNTRY", "KH"), help="Default ISO country code (e.g. KH)")
-    parser.add_argument("--min-delay", type=int, default=int(os.getenv("MIN_DELAY_SECONDS", "15")), help="Min delay seconds")
-    parser.add_argument("--max-delay", type=int, default=int(os.getenv("MAX_DELAY_SECONDS", "35")), help="Max delay seconds")
+    parser.add_argument("--delay", type=int, default=2, help="Delay in seconds between messages (default: 2)")
     
     args = parser.parse_args()
 
@@ -212,8 +209,7 @@ if __name__ == "__main__":
             phone_file=args.file,
             message_template=args.msg,
             default_country=args.country,
-            min_delay=args.min_delay,
-            max_delay=args.max_delay
+            delay_seconds=args.delay
         ))
     except KeyboardInterrupt:
         print(f"\n{Fore.YELLOW}⚠️ Process interrupted by user. Exiting safely...{Style.RESET_ALL}")

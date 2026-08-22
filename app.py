@@ -179,11 +179,12 @@ async def execute_batch(
     country_code: str,
     auto_send: bool,
     message_text: str,
-    min_delay: int,
-    max_delay: int
+    delay_seconds: float
 ):
     global STOP_SIGNAL
     STOP_SIGNAL = False
+    
+    delay_s = max(0.0, float(delay_seconds or 2))
 
     if not phone_text or not phone_text.strip():
         yield get_empty_df(), "⚠️ Phone list is empty.", render_kpi_html(0, 0, 0, 0)
@@ -221,7 +222,7 @@ async def execute_batch(
     stats = {"registered": 0, "delivered": 0, "skipped": 0, "failed": 0}
     
     action_label = "Auto-Sending from phone" if auto_send else "Checking registrations"
-    yield df, f"⚡ Starting {action_label} for {total} target numbers...", render_kpi_html(total, 0, 0, 0)
+    yield df, f"⚡ Starting {action_label} for {total} target numbers (Delay: {delay_s}s)...", render_kpi_html(total, 0, 0, 0)
 
     for idx, raw in enumerate(lines):
         if STOP_SIGNAL:
@@ -261,23 +262,22 @@ async def execute_batch(
 
                     await service.delete_contact(info["id"])
 
-                    # Anti-spam jitter delay
-                    if idx < total - 1:
-                        sleep_s = random.randint(int(min_delay), int(max_delay))
-                        df.at[idx, "Details"] = f"Delivered (Waiting {sleep_s}s)"
-                        yield df, f"Anti-flood sleep: {sleep_s}s before next contact...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
-                        await asyncio.sleep(sleep_s)
+                    # Delay between sends
+                    if idx < total - 1 and delay_s > 0:
+                        df.at[idx, "Details"] = f"Delivered (Waiting {delay_s}s)"
+                        yield df, f"Waiting {delay_s}s before next contact...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+                        await asyncio.sleep(delay_s)
                 else:
                     df.at[idx, "Delivery Status"] = "Verified"
                     df.at[idx, "Details"] = f"ID: {info['id']}"
                     await service.delete_contact(info["id"])
-                    await asyncio.sleep(0.8)
+                    await asyncio.sleep(0.5)
             else:
                 stats["skipped"] += 1
                 df.at[idx, "Registration"] = "❌ Unregistered"
                 df.at[idx, "Delivery Status"] = "⏭️ Skipped"
                 df.at[idx, "Details"] = "Not found / hidden"
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.3)
 
         except Exception as err:
             stats["failed"] += 1
@@ -296,12 +296,12 @@ async def execute_batch(
     yield df, summary, render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
 # Async Handlers
-async def on_start_autosend(phone_text, country, msg, min_d, max_d):
-    async for item in execute_batch(phone_text, country, True, msg, min_d, max_d):
+async def on_start_autosend(phone_text, country, msg, delay_val):
+    async for item in execute_batch(phone_text, country, True, msg, delay_val):
         yield item
 
-async def on_start_verify_only(phone_text, country, msg, min_d, max_d):
-    async for item in execute_batch(phone_text, country, False, "", 0, 0):
+async def on_start_verify_only(phone_text, country, msg, delay_val):
+    async for item in execute_batch(phone_text, country, False, "", 0):
         yield item
 
 # Tab 2 Single Lookups
@@ -342,7 +342,7 @@ async def on_request_code(api_id, api_hash, phone):
         f.write(f"TELEGRAM_API_ID={str(api_id).strip()}\n")
         f.write(f"TELEGRAM_API_HASH={str(api_hash).strip()}\n")
         f.write(f"TELEGRAM_PHONE={str(phone).strip()}\n")
-        f.write("DEFAULT_COUNTRY=KH\nMIN_DELAY_SECONDS=15\nMAX_DELAY_SECONDS=35\n")
+        f.write("DEFAULT_COUNTRY=KH\nMIN_DELAY_SECONDS=2\nMAX_DELAY_SECONDS=2\n")
     service.reload_env()
     service.client = None
     ok, msg = await service.send_auth_code(phone)
@@ -416,9 +416,12 @@ def build_app():
                                 lines=4
                             )
 
-                        with gr.Row():
-                            min_delay = gr.Slider(5, 45, value=15, step=1, label="Min Delay (s)")
-                            max_delay = gr.Slider(10, 60, value=30, step=1, label="Max Delay (s)")
+                        delay_input = gr.Number(
+                            label="Delay Between Messages (seconds)", 
+                            value=2, 
+                            precision=0, 
+                            minimum=0
+                        )
 
                         with gr.Row():
                             send_btn = gr.Button("🚀 Start Auto-Send", variant="primary", scale=2)
@@ -441,13 +444,13 @@ def build_app():
                 
                 send_btn.click(
                     fn=on_start_autosend,
-                    inputs=[phone_input, batch_country, msg_input, min_delay, max_delay],
+                    inputs=[phone_input, batch_country, msg_input, delay_input],
                     outputs=[table_output, status_ticker, kpi_box]
                 )
 
                 verify_btn.click(
                     fn=on_start_verify_only,
-                    inputs=[phone_input, batch_country, msg_input, min_delay, max_delay],
+                    inputs=[phone_input, batch_country, msg_input, delay_input],
                     outputs=[table_output, status_ticker, kpi_box]
                 )
 
