@@ -15,21 +15,84 @@ from telegram_service import TelegramService
 load_dotenv()
 
 service = TelegramService()
-STOP_REQUESTED = False
+STOP_SIGNAL = False
 
 DEFAULT_BOT_MESSAGE = (
-    "Hello! 👋 Thank you for reaching out to us.\n"
-    "To get fast assistance and start chatting with our official automated service, please tap the link below:\n"
+    "Hello! 👋 Thank you for reaching out.\n"
+    "To start chatting with our official assistant, tap the link below:\n"
     "👉 {bot_link}"
 )
 
 CUSTOM_CSS = """
-.gradio-container { max-width: 1200px !important; margin: auto; }
-.header-banner { background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%); color: white; padding: 22px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-.header-title { font-size: 26px; font-weight: 800; margin: 0; }
-.header-sub { font-size: 14px; opacity: 0.9; margin-top: 6px; }
-.kpi-container { margin-bottom: 15px; }
-.preview-box { background: #0f172a; color: #38bdf8; border: 1px solid #334155; border-radius: 8px; padding: 12px; }
+/* Modern SaaS Minimalist Theme */
+.gradio-container {
+    max-width: 1250px !important;
+    margin: 0 auto !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+}
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: #0f172a;
+    border-radius: 12px;
+    margin-bottom: 16px;
+    border: 1px solid #1e293b;
+}
+.app-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.app-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0;
+    letter-spacing: -0.3px;
+}
+.app-subtitle {
+    font-size: 12px;
+    color: #94a3b8;
+    margin: 0;
+}
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.kpi-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    padding: 14px 16px;
+}
+.kpi-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+}
+.kpi-value {
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 4px;
+    color: #f8fafc;
+}
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    background: #1e293b;
+    color: #e2e8f0;
+}
 """
 
 def find_available_port(start_port: int = 7860, max_port: int = 7890) -> int:
@@ -41,9 +104,9 @@ def find_available_port(start_port: int = 7860, max_port: int = 7890) -> int:
                 return port
             except OSError:
                 continue
-    return 0  # 0 lets OS allocate any random free port
+    return 0
 
-def get_20_sample_numbers():
+def get_default_phone_list():
     if os.path.exists("phone-list.txt"):
         with open("phone-list.txt", "r", encoding="utf-8") as f:
             return f.read().strip()
@@ -54,483 +117,394 @@ def get_20_sample_numbers():
         "011223344\n095887766\n086445566\n069334455\n077123987"
     )
 
-def render_kpi_cards(total, registered, sent, skipped, failed, is_running=False):
-    reg_pct = (registered / total * 100) if total > 0 else 0
+def render_kpi_html(total: int = 20, registered: int = 0, delivered: int = 0, skipped: int = 0):
     return f"""
-    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:12px;margin-bottom:15px;">
-        <div style="background:#1e293b;color:#f8fafc;padding:14px;border-radius:10px;border-left:4px solid #3b82f6;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-            <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600;">Total Numbers</div>
-            <div style="font-size:24px;font-weight:700;margin-top:4px;">{total}</div>
+    <div class="kpi-grid">
+        <div class="kpi-card" style="border-left: 3px solid #3b82f6;">
+            <div class="kpi-label">Target Numbers</div>
+            <div class="kpi-value">{total}</div>
         </div>
-        <div style="background:#1e293b;color:#f8fafc;padding:14px;border-radius:10px;border-left:4px solid #10b981;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-            <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600;">Registered ({reg_pct:.0f}%)</div>
-            <div style="font-size:24px;font-weight:700;color:#34d399;margin-top:4px;">{registered}</div>
+        <div class="kpi-card" style="border-left: 3px solid #10b981;">
+            <div class="kpi-label">Registered Accounts</div>
+            <div class="kpi-value" style="color:#34d399;">{registered}</div>
         </div>
-        <div style="background:#1e293b;color:#f8fafc;padding:14px;border-radius:10px;border-left:4px solid #8b5cf6;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-            <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600;">Messages Sent</div>
-            <div style="font-size:24px;font-weight:700;color:#a78bfa;margin-top:4px;">{sent}</div>
+        <div class="kpi-card" style="border-left: 3px solid #8b5cf6;">
+            <div class="kpi-label">Delivered Messages</div>
+            <div class="kpi-value" style="color:#a78bfa;">{delivered}</div>
         </div>
-        <div style="background:#1e293b;color:#f8fafc;padding:14px;border-radius:10px;border-left:4px solid #eab308;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-            <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600;">Unregistered / Skipped</div>
-            <div style="font-size:24px;font-weight:700;color:#facc15;margin-top:4px;">{skipped}</div>
-        </div>
-        <div style="background:#1e293b;color:#f8fafc;padding:14px;border-radius:10px;border-left:4px solid #ef4444;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-            <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:600;">Errors / Failed</div>
-            <div style="font-size:24px;font-weight:700;color:#f87171;margin-top:4px;">{failed}</div>
+        <div class="kpi-card" style="border-left: 3px solid #f59e0b;">
+            <div class="kpi-label">Skipped / Private</div>
+            <div class="kpi-value" style="color:#fbbf24;">{skipped}</div>
         </div>
     </div>
     """
 
-async def check_auth_status():
-    """Checks and returns the current authentication status badge."""
+def get_empty_df():
+    return pd.DataFrame(columns=["#", "Phone (E.164)", "Registration", "Recipient", "Delivery Status", "Details"])
+
+async def check_header_status():
+    """Returns clean compact account status HTML."""
     try:
         if await service.is_authenticated():
             me = await service.get_me_info()
             if me:
                 name = f"{me['first_name']} {me['last_name']}".strip()
-                username = f"@{me['username']}" if me['username'] else "No Username"
-                return (
-                    f"### 🟢 **Telegram Connected & Ready**\n"
-                    f"- **Sender Profile**: **{name}** ({username})\n"
-                    f"- **Account ID**: `{me['id']}` | **Phone**: `{me['phone']}`"
-                )
-        return "### 🔴 **Not Authenticated** — Please log in using the *Telegram Account & Credentials* tab."
-    except Exception as e:
-        return f"### ⚠️ **Connection Notice**: {str(e)}"
+                uname = f"@{me['username']}" if me['username'] else f"+{me['phone']}"
+                return f"""
+                <div class="status-pill" style="border: 1px solid #059669; background: #064e3b; color: #a7f3d0;">
+                    <span style="height:8px;width:8px;border-radius:50%;background:#10b981;display:inline-block;"></span>
+                    <span>{name} ({uname})</span>
+                </div>
+                """
+        return """
+        <div class="status-pill" style="border: 1px solid #dc2626; background: #450a0a; color: #fecaca;">
+            <span style="height:8px;width:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
+            <span>Disconnected · Log In Required</span>
+        </div>
+        """
+    except Exception:
+        return """
+        <div class="status-pill" style="border: 1px solid #d97706; background: #451a03; color: #fde68a;">
+            <span>⚠️ Session Offline</span>
+        </div>
+        """
 
-async def save_credentials_and_send_code(api_id, api_hash, phone):
-    """Saves credentials to .env and triggers login verification code."""
-    if not api_id or not api_hash or not phone:
-        return "❌ Please enter API ID, API Hash, and Phone Number.", gr.update()
-    
-    with open(".env", "w", encoding="utf-8") as f:
-        f.write(f"TELEGRAM_API_ID={str(api_id).strip()}\n")
-        f.write(f"TELEGRAM_API_HASH={str(api_hash).strip()}\n")
-        f.write(f"TELEGRAM_PHONE={str(phone).strip()}\n")
-        f.write("DEFAULT_COUNTRY=KH\nMIN_DELAY_SECONDS=15\nMAX_DELAY_SECONDS=35\n")
-    
-    service.reload_env()
-    service.client = None
+def set_stop():
+    global STOP_SIGNAL
+    STOP_SIGNAL = True
+    return "🛑 Stopping after current step..."
 
-    ok, msg = await service.send_auth_code(phone)
-    if ok:
-        status_msg = f"✅ {msg}"
-    else:
-        status_msg = f"❌ {msg}"
-    
-    auth_badge = await check_auth_status()
-    return status_msg, auth_badge
-
-async def verify_code(code, password):
-    """Verifies the SMS/Telegram code and optional 2FA password."""
-    if not code:
-        return "❌ Please enter the code sent to your Telegram app.", gr.update()
-
-    ok, msg, needs_pwd = await service.sign_in_with_code(code, password)
-    auth_badge = await check_auth_status()
-    if ok:
-        return f"✅ {msg}", auth_badge
-    elif needs_pwd:
-        return f"⚠️ {msg}", auth_badge
-    else:
-        return f"❌ {msg}", auth_badge
-
-def trigger_stop():
-    global STOP_REQUESTED
-    STOP_REQUESTED = True
-    return "🛑 Stop signal sent. Completing current step then halting..."
-
-def update_preview(msg_template, bot_url):
-    formatted = service.format_message_template(msg_template, {"first_name": "Sophea", "username": "sophea_test"}, bot_url)
-    return f"```text\n{formatted}\n```"
-
-# Real-Time Streaming Processor for Batch Operations
-async def process_batch_streaming(
-    phone_text, 
-    country_code, 
-    auto_send, 
-    message_text, 
-    bot_link, 
-    min_delay, 
-    max_delay, 
-    progress=gr.Progress()
+# Core Batch Processor
+async def execute_batch(
+    phone_text: str,
+    country_code: str,
+    auto_send: bool,
+    message_text: str,
+    bot_link: str,
+    min_delay: int,
+    max_delay: int
 ):
-    global STOP_REQUESTED
-    STOP_REQUESTED = False
+    global STOP_SIGNAL
+    STOP_SIGNAL = False
 
-    if not phone_text:
-        yield pd.DataFrame(), "❌ Phone list is empty.", render_kpi_cards(0, 0, 0, 0, 0), None
+    cols = ["#", "Phone (E.164)", "Registration", "Recipient", "Delivery Status", "Details"]
+    if not phone_text or not phone_text.strip():
+        yield get_empty_df(), "⚠️ Phone list is empty.", render_kpi_html(0, 0, 0, 0)
         return
 
     lines = [line.strip() for line in phone_text.splitlines() if line.strip() and not line.startswith("#")]
     total = len(lines)
     if total == 0:
-        yield pd.DataFrame(), "❌ No valid phone numbers found.", render_kpi_cards(0, 0, 0, 0, 0), None
+        yield get_empty_df(), "⚠️ No valid phone numbers found.", render_kpi_html(0, 0, 0, 0)
         return
 
-    # Check connection
     try:
         await service.connect()
         if not await service.is_authenticated():
-            yield pd.DataFrame(), "❌ Telegram session not authorized. Please log in on Tab 3 first.", render_kpi_cards(0, 0, 0, 0, 0), None
+            yield get_empty_df(), "❌ Not logged in. Please authenticate in Account Settings tab first.", render_kpi_html(total, 0, 0, 0)
             return
     except Exception as e:
-        yield pd.DataFrame(), f"❌ Connection Error: {str(e)}", render_kpi_cards(0, 0, 0, 0, 0), None
+        yield get_empty_df(), f"❌ Connection Error: {e}", render_kpi_html(total, 0, 0, 0)
         return
 
-    results = []
-    stats = {"total": total, "registered": 0, "sent": 0, "skipped": 0, "failed": 0}
-    progress(0, desc=f"Initializing test batch of {total} numbers...")
-
-    # Initial empty dataframe render
-    initial_rows = []
-    for idx, raw_phone in enumerate(lines, 1):
-        e164 = format_phone_e164(raw_phone, default_region=country_code)
-        initial_rows.append({
-            "#": idx,
-            "Raw Input": raw_phone,
-            "Normalized (E.164)": e164,
-            "Registered": "⏳ Queued",
-            "Name": "-",
-            "Username": "-",
+    # Pre-populate table rows
+    rows = []
+    for i, raw in enumerate(lines, 1):
+        e164 = format_phone_e164(raw, default_region=country_code)
+        rows.append({
+            "#": i,
+            "Phone (E.164)": e164,
+            "Registration": "⏳ Queued",
+            "Recipient": "-",
             "Delivery Status": "Pending" if auto_send else "Queued",
             "Details": ""
         })
-    
-    df = pd.DataFrame(initial_rows)
-    yield df, f"⚡ Starting batch processing ({total} numbers)...", render_kpi_cards(total, 0, 0, 0, 0, is_running=True), None
 
-    for i, raw_phone in enumerate(lines):
-        if STOP_REQUESTED:
-            yield df, f"🛑 **Processing Halted by User** at item {i}/{total}.", render_kpi_cards(total, stats['registered'], stats['sent'], stats['skipped'], stats['failed'], is_running=False), "auto_send_results.csv"
+    df = pd.DataFrame(rows)
+    stats = {"registered": 0, "delivered": 0, "skipped": 0, "failed": 0}
+    
+    action_label = "Auto-Sending messages" if auto_send else "Checking registrations"
+    yield df, f"⚡ Starting campaign: {action_label} for {total} numbers...", render_kpi_html(total, 0, 0, 0)
+
+    for idx, raw in enumerate(lines):
+        if STOP_SIGNAL:
+            yield df, f"🛑 Campaign stopped by user at #{idx}/{total}.", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
             return
 
-        e164 = format_phone_e164(raw_phone, default_region=country_code)
-        df.at[i, "Registered"] = "🔍 Checking..."
-        df.at[i, "Details"] = "Querying Telegram MTProto..."
-        yield df, f"Processing [{i+1}/{total}]: {e164}...", render_kpi_cards(total, stats['registered'], stats['sent'], stats['skipped'], stats['failed'], is_running=True), None
+        e164 = format_phone_e164(raw, default_region=country_code)
+        df.at[idx, "Registration"] = "🔍 Checking..."
+        df.at[idx, "Details"] = "Querying MTProto..."
+        yield df, f"Processing [{idx + 1}/{total}]: {e164}", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
         try:
             is_reg, info, user_entity = await service.check_phone_registration(e164, cleanup_contact=False)
             if is_reg and info:
                 stats["registered"] += 1
                 name = f"{info['first_name']} {info['last_name']}".strip()
-                username = f"@{info['username']}" if info['username'] else "-"
+                uname = f"@{info['username']}" if info['username'] else "-"
                 
-                df.at[i, "Registered"] = "✅ YES"
-                df.at[i, "Name"] = name
-                df.at[i, "Username"] = username
+                df.at[idx, "Registration"] = "✅ Registered"
+                df.at[idx, "Recipient"] = f"{name} ({uname})"
 
                 if auto_send and user_entity:
-                    df.at[i, "Delivery Status"] = "🚀 Sending..."
-                    yield df, f"Dispatching message to {name}...", render_kpi_cards(total, stats['registered'], stats['sent'], stats['skipped'], stats['failed'], is_running=True), None
-                    
+                    df.at[idx, "Delivery Status"] = "🚀 Sending..."
+                    yield df, f"Sending message to {name}...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+
                     final_msg = service.format_message_template(message_text, user_info=info, bot_link=bot_link)
-                    success, send_info = await service.send_message_to_user(user_entity, final_msg)
+                    success, detail = await service.send_message_to_user(user_entity, final_msg)
 
                     if success:
-                        stats["sent"] += 1
-                        df.at[i, "Delivery Status"] = "✅ SENT"
-                        df.at[i, "Details"] = f"Msg ID: {send_info}"
+                        stats["delivered"] += 1
+                        df.at[idx, "Delivery Status"] = "✅ Delivered"
+                        df.at[idx, "Details"] = f"Msg #{detail}"
                     else:
                         stats["failed"] += 1
-                        df.at[i, "Delivery Status"] = "❌ FAILED"
-                        df.at[i, "Details"] = str(send_info)
+                        df.at[idx, "Delivery Status"] = "❌ Failed"
+                        df.at[idx, "Details"] = str(detail)
 
-                    # Delete contact after send
                     await service.delete_contact(info["id"])
 
-                    # Anti-spam delay
-                    if i < total - 1:
-                        sleep_time = random.randint(int(min_delay), int(max_delay))
-                        df.at[i, "Details"] = f"Sent (Waiting {sleep_time}s anti-flood delay)"
-                        yield df, f"Sleeping {sleep_time}s to protect sender account...", render_kpi_cards(total, stats['registered'], stats['sent'], stats['skipped'], stats['failed'], is_running=True), None
-                        await asyncio.sleep(sleep_time)
+                    # Anti-spam jitter delay
+                    if idx < total - 1:
+                        sleep_s = random.randint(int(min_delay), int(max_delay))
+                        df.at[idx, "Details"] = f"Delivered (Waiting {sleep_s}s)"
+                        yield df, f"Anti-flood sleep: {sleep_s}s before next contact...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+                        await asyncio.sleep(sleep_s)
                 else:
-                    df.at[i, "Delivery Status"] = "🔍 Verified"
-                    df.at[i, "Details"] = f"ID: {info['id']}"
+                    df.at[idx, "Delivery Status"] = "Verified"
+                    df.at[idx, "Details"] = f"ID: {info['id']}"
                     await service.delete_contact(info["id"])
-                    await asyncio.sleep(1.0)
-
+                    await asyncio.sleep(0.8)
             else:
                 stats["skipped"] += 1
-                df.at[i, "Registered"] = "❌ NO"
-                df.at[i, "Delivery Status"] = "⏭️ SKIPPED"
-                df.at[i, "Details"] = "Unregistered or privacy hidden"
-                await asyncio.sleep(0.8)
+                df.at[idx, "Registration"] = "❌ Unregistered"
+                df.at[idx, "Delivery Status"] = "⏭️ Skipped"
+                df.at[idx, "Details"] = "Not found / hidden"
+                await asyncio.sleep(0.5)
 
-        except Exception as e:
+        except Exception as err:
             stats["failed"] += 1
-            df.at[i, "Registered"] = "⚠️ ERROR"
-            df.at[i, "Delivery Status"] = "⚠️ ERROR"
-            df.at[i, "Details"] = str(e)
+            df.at[idx, "Registration"] = "⚠️ Error"
+            df.at[idx, "Delivery Status"] = "Error"
+            df.at[idx, "Details"] = str(err)
 
-        progress((i + 1) / total, desc=f"Processed {i + 1}/{total} numbers")
-        yield df, f"Processed {i + 1}/{total} phone numbers", render_kpi_cards(total, stats['registered'], stats['sent'], stats['skipped'], stats['failed'], is_running=(i < total - 1)), None
+        yield df, f"Completed {idx + 1} of {total} numbers", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
-    # Save to CSV and JSON on completion
-    csv_path = "auto_send_results.csv"
-    json_path = "auto_send_results.json"
-    df.to_csv(csv_path, index=False, encoding="utf-8-sig")
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(df.to_dict(orient="records"), f, indent=2, ensure_ascii=False)
+    # Auto-export CSV
+    try:
+        df.to_csv("auto_send_results.csv", index=False, encoding="utf-8-sig")
+    except Exception:
+        pass
 
-    summary_text = (
-        f"🎉 **Batch Complete!** Processed **{total}** numbers. "
-        f"Found **{stats['registered']}** registered profiles, sent **{stats['sent']}** messages. "
-        f"Report exported to `{csv_path}`."
-    )
-    yield df, summary_text, render_kpi_cards(total, stats['registered'], stats['sent'], stats['skipped'], stats['failed'], is_running=False), csv_path
+    summary = f"🎉 Campaign Finished! Checked {total} numbers · {stats['registered']} registered · {stats['delivered']} messages sent."
+    yield df, summary, render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
-# Tab 2: Single Phone Handlers
-async def handle_single_check(phone_str, country_code):
+# Async Handlers for Buttons
+async def on_start_autosend(phone_text, country, msg, bot_link, min_d, max_d):
+    async for item in execute_batch(phone_text, country, True, msg, bot_link, min_d, max_d):
+        yield item
+
+async def on_start_verify_only(phone_text, country, msg, bot_link, min_d, max_d):
+    async for item in execute_batch(phone_text, country, False, "", "", 0, 0):
+        yield item
+
+# Tab 2 Single Lookups
+async def on_single_lookup(phone_str, country):
     if not phone_str:
-        return "❌ Please enter a phone number.", "", gr.update(interactive=False)
-
-    e164 = format_phone_e164(phone_str, default_region=country_code)
+        return "Please enter a phone number."
+    e164 = format_phone_e164(phone_str, default_region=country)
     try:
         is_reg, info, _ = await service.check_phone_registration(e164, cleanup_contact=False)
         if is_reg and info:
             name = f"{info['first_name']} {info['last_name']}".strip()
-            username = f"@{info['username']}" if info['username'] else "No username"
-            result_md = (
-                f"### ✅ **Phone is Registered on Telegram!**\n"
-                f"- **Normalized (E.164)**: `{e164}`\n"
-                f"- **Full Name**: **{name}**\n"
-                f"- **Username**: `{username}`\n"
-                f"- **Telegram User ID**: `{info['id']}`\n"
-                f"- **Account Status**: `{info['status']}`"
-            )
-            return result_md, e164, gr.update(interactive=True)
-        else:
-            result_md = (
-                f"### ⚠️ **Not Registered or Privacy Hidden**\n"
-                f"- **Normalized (E.164)**: `{e164}`\n"
-                f"- Telegram did not find an active public account for this number."
-            )
-            return result_md, e164, gr.update(interactive=False)
+            uname = f"@{info['username']}" if info['username'] else "None"
+            return f"✅ **Registered**: {name} ({uname}) · ID: `{info['id']}` · Activity: `{info['status']}`"
+        return f"❌ **Not Registered / Private**: `{e164}`"
     except Exception as e:
-        return f"❌ Error: {str(e)}", e164, gr.update(interactive=False)
+        return f"⚠️ Error: {e}"
 
-async def handle_single_send(phone_str, message_text, bot_link, country_code):
-    if not phone_str or not message_text:
-        return "❌ Phone number and message are required."
-
-    e164 = format_phone_e164(phone_str, default_region=country_code)
+async def on_single_send(phone_str, msg, bot_link, country):
+    if not phone_str or not msg:
+        return "Phone number and message are required."
+    e164 = format_phone_e164(phone_str, default_region=country)
     try:
-        is_reg, info, user_entity = await service.check_phone_registration(e164, cleanup_contact=False)
-        if not is_reg or not user_entity:
-            return f"⚠️ Cannot send: `{e164}` is not registered on Telegram."
-
-        final_msg = service.format_message_template(message_text, user_info=info, bot_link=bot_link)
-        success, details = await service.send_message_to_user(user_entity, final_msg)
+        is_reg, info, entity = await service.check_phone_registration(e164, cleanup_contact=False)
+        if not is_reg or not entity:
+            return f"❌ Cannot send: `{e164}` is not registered."
+        final_msg = service.format_message_template(msg, user_info=info, bot_link=bot_link)
+        ok, res = await service.send_message_to_user(entity, final_msg)
         await service.delete_contact(info["id"])
-        
-        if success:
-            return f"✅ **Message Sent Successfully!** (Telegram Message ID: `{details}`)"
-        else:
-            return f"❌ **Send Failed**: {details}"
+        return f"✅ **Sent successfully!** (Message ID: `{res}`)" if ok else f"❌ **Failed**: {res}"
     except Exception as e:
-        return f"❌ Error sending message: {str(e)}"
+        return f"⚠️ Send Error: {e}"
 
-# UI Construction
-def build_ui():
-    with gr.Blocks(title="Telegram Auto-Messenger & Lead Qualifier") as demo:
-        gr.HTML(
-            """
-            <div class="header-banner">
-                <div class="header-title">⚡ Telegram Phone Registration & Auto-Messenger Suite</div>
-                <div class="header-sub">Automated contact resolution via MTProto & direct messaging pipeline with Bot link onboarding and flood protection.</div>
-            </div>
-            """
-        )
+# Tab 3 Login Handlers
+async def on_request_code(api_id, api_hash, phone):
+    if not api_id or not api_hash or not phone:
+        return "Please fill in API ID, API Hash, and Phone Number.", await check_header_status()
+    with open(".env", "w", encoding="utf-8") as f:
+        f.write(f"TELEGRAM_API_ID={str(api_id).strip()}\n")
+        f.write(f"TELEGRAM_API_HASH={str(api_hash).strip()}\n")
+        f.write(f"TELEGRAM_PHONE={str(phone).strip()}\n")
+        f.write("DEFAULT_COUNTRY=KH\nMIN_DELAY_SECONDS=15\nMAX_DELAY_SECONDS=35\n")
+    service.reload_env()
+    service.client = None
+    ok, msg = await service.send_auth_code(phone)
+    status_text = f"✅ {msg}" if ok else f"❌ {msg}"
+    return status_text, await check_header_status()
 
-        with gr.Row():
-            auth_status_box = gr.Markdown("### 🔄 Checking Telegram Session Status...")
+async def on_verify_login(code, pwd):
+    if not code:
+        return "Please enter the verification code.", await check_header_status()
+    ok, msg, needs_pwd = await service.sign_in_with_code(code, pwd)
+    badge = await check_header_status()
+    if ok:
+        return f"✅ {msg}", badge
+    elif needs_pwd:
+        return f"⚠️ {msg}", badge
+    return f"❌ {msg}", badge
+
+def build_app():
+    with gr.Blocks(title="TeleSender Pro") as demo:
+        # Compact Header
+        with gr.Row(elem_classes=["app-header"]):
+            with gr.Column(scale=3):
+                gr.HTML(
+                    """
+                    <div class="app-brand">
+                        <div>
+                            <div class="app-title">⚡ TeleSender Pro</div>
+                            <div class="app-subtitle">Automated Lead Qualifier & Telegram Direct Outreach</div>
+                        </div>
+                    </div>
+                    """
+                )
+            with gr.Column(scale=2):
+                header_status = gr.HTML(
+                    """
+                    <div class="status-pill">
+                        <span>Checking session...</span>
+                    </div>
+                    """
+                )
 
         with gr.Tabs():
-            # Tab 1: Primary Batch Auto-Messenger (Target Demo for Monday)
-            with gr.Tab("🚀 Batch Auto-Messenger (Production Demo)"):
-                kpi_display = gr.HTML(render_kpi_cards(20, 0, 0, 0, 0))
+            # Main Tab: Campaign Automation
+            with gr.Tab("🚀 Broadcast Campaign"):
+                kpi_box = gr.HTML(render_kpi_html(20, 0, 0, 0))
 
                 with gr.Row():
-                    # Left Column: Inputs & Controls
-                    with gr.Column(scale=1):
-                        gr.Markdown("### 📝 1. Target Phone Numbers")
-                        batch_phone_text = gr.Textbox(
-                            label="Phone Numbers (One per line)", 
-                            value=get_20_sample_numbers(), 
-                            lines=8,
-                            placeholder="Enter local or international phone numbers..."
-                        )
-                        
-                        with gr.Row():
-                            load_20_btn = gr.Button("📋 Reset / Load 20 Test Numbers", size="sm", variant="secondary")
-                            batch_country = gr.Dropdown(
-                                label="Country Code", 
-                                choices=["KH", "US", "TH", "VN", "SG", "MY"], 
-                                value="KH",
-                                scale=1
+                    # Left Column: Configuration & Actions
+                    with gr.Column(scale=4):
+                        with gr.Group():
+                            with gr.Row():
+                                batch_country = gr.Dropdown(
+                                    label="Region", 
+                                    choices=["KH", "US", "TH", "VN", "SG", "MY"], 
+                                    value="KH",
+                                    scale=1
+                                )
+                                reload_btn = gr.Button("🔄 Load 20 Test Numbers", size="sm", scale=1)
+
+                            phone_input = gr.Textbox(
+                                label="Phone Numbers", 
+                                value=get_default_phone_list(), 
+                                lines=7,
+                                placeholder="Paste phone numbers (one per line)..."
                             )
 
-                        gr.Markdown("---")
-                        gr.Markdown("### 💬 2. Message & Bot Configuration")
-                        bot_link_input = gr.Textbox(
-                            label="Official Bot Link / Username", 
-                            value="https://t.me/YourOfficialBot", 
-                            placeholder="e.g. https://t.me/YourSupportBot"
-                        )
-                        batch_msg_template = gr.Textbox(
-                            label="Message Content Template", 
-                            value=DEFAULT_BOT_MESSAGE, 
-                            lines=4
-                        )
-                        
-                        with gr.Accordion("👁️ Message Preview for Recipient", open=False):
-                            preview_display = gr.Markdown(f"```text\n{DEFAULT_BOT_MESSAGE.replace('{bot_link}', 'https://t.me/YourOfficialBot')}\n```")
-
-                        gr.Markdown("---")
-                        gr.Markdown("### 🛡️ 3. Anti-Flood Jitter Delay")
-                        with gr.Row():
-                            min_delay = gr.Slider(minimum=5, maximum=60, value=15, step=1, label="Min Delay (sec)")
-                            max_delay = gr.Slider(minimum=10, maximum=120, value=30, step=1, label="Max Delay (sec)")
+                        with gr.Group():
+                            bot_link_input = gr.Textbox(
+                                label="Official Bot Link", 
+                                value="https://t.me/YourOfficialBot",
+                                placeholder="https://t.me/YourBot"
+                            )
+                            msg_input = gr.Textbox(
+                                label="Message Template", 
+                                value=DEFAULT_BOT_MESSAGE, 
+                                lines=3
+                            )
 
                         with gr.Row():
-                            check_batch_btn = gr.Button("🔍 1. Check Numbers Only", variant="secondary")
-                            send_batch_btn = gr.Button("🚀 2. Auto-Send to Registered", variant="primary")
-                        
-                        stop_batch_btn = gr.Button("🛑 Emergency Stop", variant="stop")
+                            min_delay = gr.Slider(5, 45, value=15, step=1, label="Min Delay (s)")
+                            max_delay = gr.Slider(10, 60, value=30, step=1, label="Max Delay (s)")
 
-                    # Right Column: Real-time Live Streaming Table & Export
-                    with gr.Column(scale=2):
-                        gr.Markdown("### 📊 Real-Time Execution Table")
-                        batch_status_msg = gr.Markdown("Ready. Click **Auto-Send to Registered** to begin.")
-                        
-                        results_table = gr.Dataframe(
-                            headers=["#", "Raw Input", "Normalized (E.164)", "Registered", "Name", "Username", "Delivery Status", "Details"],
-                            datatype=["number", "str", "str", "str", "str", "str", "str", "str"],
+                        with gr.Row():
+                            send_btn = gr.Button("🚀 Start Auto-Send", variant="primary", scale=2)
+                            verify_btn = gr.Button("🔍 Verify Only", variant="secondary", scale=1)
+                            stop_btn = gr.Button("⏹ Stop", variant="stop", scale=1)
+
+                    # Right Column: Clean Live Data Table
+                    with gr.Column(scale=6):
+                        status_ticker = gr.Markdown("**Status**: Ready to launch.")
+                        table_output = gr.Dataframe(
+                            value=get_empty_df(),
+                            headers=["#", "Phone (E.164)", "Registration", "Recipient", "Delivery Status", "Details"],
+                            datatype=["number", "str", "str", "str", "str", "str"],
                             interactive=False,
                             wrap=True
                         )
 
-                        download_csv = gr.File(label="📥 Download Exported CSV Report", interactive=False)
-
-                # Event handlers for Tab 1
-                load_20_btn.click(fn=get_20_sample_numbers, outputs=[batch_phone_text])
+                # Event Bindings for Main Tab
+                reload_btn.click(fn=get_default_phone_list, outputs=[phone_input])
                 
-                bot_link_input.change(
-                    fn=update_preview,
-                    inputs=[batch_msg_template, bot_link_input],
-                    outputs=[preview_display]
-                )
-                batch_msg_template.change(
-                    fn=update_preview,
-                    inputs=[batch_msg_template, bot_link_input],
-                    outputs=[preview_display]
+                send_btn.click(
+                    fn=on_start_autosend,
+                    inputs=[phone_input, batch_country, msg_input, bot_link_input, min_delay, max_delay],
+                    outputs=[table_output, status_ticker, kpi_box]
                 )
 
-                check_batch_btn.click(
-                    fn=lambda p, c, m, b: process_batch_streaming(p, c, auto_send=False, message_text="", bot_link="", min_delay=0, max_delay=0),
-                    inputs=[batch_phone_text, batch_country, batch_msg_template, bot_link_input],
-                    outputs=[results_table, batch_status_msg, kpi_display, download_csv]
+                verify_btn.click(
+                    fn=on_start_verify_only,
+                    inputs=[phone_input, batch_country, msg_input, bot_link_input, min_delay, max_delay],
+                    outputs=[table_output, status_ticker, kpi_box]
                 )
 
-                send_batch_btn.click(
-                    fn=lambda p, c, m, b, mi, ma: process_batch_streaming(p, c, auto_send=True, message_text=m, bot_link=b, min_delay=mi, max_delay=ma),
-                    inputs=[batch_phone_text, batch_country, batch_msg_template, bot_link_input, min_delay, max_delay],
-                    outputs=[results_table, batch_status_msg, kpi_display, download_csv]
-                )
+                stop_btn.click(fn=set_stop, outputs=[status_ticker])
 
-                stop_batch_btn.click(fn=trigger_stop, outputs=[batch_status_msg])
-
-            # Tab 2: Single Phone Quick Inspector
-            with gr.Tab("🔍 Single Phone Lookup & Test"):
+            # Tab 2: Single Lookup
+            with gr.Tab("🔍 Single Lookup"):
                 with gr.Row():
                     with gr.Column():
-                        single_phone = gr.Textbox(label="Phone Number", placeholder="e.g. 0968271451 or +855968271451", value="0968271451")
-                        single_country = gr.Dropdown(label="Default Region", choices=["KH", "US", "TH", "VN", "SG", "MY"], value="KH")
-                        check_single_btn = gr.Button("🔍 Check Registration", variant="primary")
+                        s_phone = gr.Textbox(label="Phone Number", value="0968271451")
+                        s_country = gr.Dropdown(label="Country", choices=["KH", "US", "TH", "VN"], value="KH")
+                        s_check_btn = gr.Button("🔍 Check Registration", variant="primary")
+                        s_result = gr.Markdown()
+                    
                     with gr.Column():
-                        single_result_box = gr.Markdown("Enter a phone number and click Check Registration.")
+                        s_bot = gr.Textbox(label="Bot Link", value="https://t.me/YourOfficialBot")
+                        s_msg = gr.Textbox(label="Message", value=DEFAULT_BOT_MESSAGE, lines=3)
+                        s_send_btn = gr.Button("✉️ Send Message", variant="secondary")
+                        s_send_res = gr.Markdown()
 
-                gr.Markdown("---")
-                gr.Markdown("### Direct Message Test")
+                s_check_btn.click(fn=on_single_lookup, inputs=[s_phone, s_country], outputs=[s_result])
+                s_send_btn.click(fn=on_single_send, inputs=[s_phone, s_msg, s_bot, s_country], outputs=[s_send_res])
+
+            # Tab 3: Account & Session
+            with gr.Tab("⚙️ Account & Login"):
                 with gr.Row():
-                    with gr.Column():
-                        single_bot_link = gr.Textbox(label="Bot Link", value="https://t.me/YourOfficialBot")
-                        single_test_msg = gr.Textbox(label="Message Template", value=DEFAULT_BOT_MESSAGE, lines=3)
-                        send_single_btn = gr.Button("✉️ Send Message Now", variant="secondary")
-                    with gr.Column():
-                        single_send_result = gr.Markdown()
-
-                check_single_btn.click(
-                    handle_single_check,
-                    inputs=[single_phone, single_country],
-                    outputs=[single_result_box, single_phone, send_single_btn]
-                )
-
-                send_single_btn.click(
-                    handle_single_send,
-                    inputs=[single_phone, single_test_msg, single_bot_link, single_country],
-                    outputs=[single_send_result]
-                )
-
-            # Tab 3: Telegram Login & Account Session
-            with gr.Tab("🔐 Telegram Account & Credentials"):
-                gr.Markdown(
-                    """
-                    ### 📱 Connect Sender Account
-                    Credentials are saved safely to your local `.env`. Sessions are stored in `telebot_session.session`.
-                    """
-                )
-                with gr.Row():
-                    api_id_input = gr.Textbox(
-                        label="Telegram API ID", 
-                        value=os.getenv("TELEGRAM_API_ID", ""), 
-                        placeholder="e.g. 12345678"
-                    )
-                    api_hash_input = gr.Textbox(
-                        label="Telegram API Hash", 
-                        value=os.getenv("TELEGRAM_API_HASH", ""), 
-                        placeholder="e.g. 0123456789abcdef0123456789abcdef", 
-                        type="password"
-                    )
-                
-                phone_input = gr.Textbox(
-                    label="Sender Account Phone Number (with Country Code)", 
-                    value=os.getenv("TELEGRAM_PHONE", "+855"), 
-                    placeholder="+855XXXXXXXX"
-                )
-
-                send_code_btn = gr.Button("📲 1. Request Login Verification Code", variant="primary")
-                code_status = gr.Markdown()
+                    api_id = gr.Textbox(label="API ID", value=os.getenv("TELEGRAM_API_ID", ""))
+                    api_hash = gr.Textbox(label="API Hash", value=os.getenv("TELEGRAM_API_HASH", ""), type="password")
+                phone_num = gr.Textbox(label="Sender Phone", value=os.getenv("TELEGRAM_PHONE", "+855"))
+                req_btn = gr.Button("📲 Request Login Code")
+                req_status = gr.Markdown()
 
                 with gr.Row():
-                    code_input = gr.Textbox(label="Enter Verification Code", placeholder="Code sent to Telegram / SMS")
-                    pwd_input = gr.Textbox(label="2FA Password (If enabled on account)", type="password")
+                    code_in = gr.Textbox(label="Verification Code")
+                    pwd_in = gr.Textbox(label="2FA Password", type="password")
+                login_btn = gr.Button("🔓 Authenticate Session")
+                login_res = gr.Markdown()
 
-                login_btn = gr.Button("🔓 2. Verify & Authenticate Session", variant="secondary")
-                login_status = gr.Markdown()
+                req_btn.click(fn=on_request_code, inputs=[api_id, api_hash, phone_num], outputs=[req_status, header_status])
+                login_btn.click(fn=on_verify_login, inputs=[code_in, pwd_in], outputs=[login_res, header_status])
 
-                send_code_btn.click(
-                    save_credentials_and_send_code,
-                    inputs=[api_id_input, api_hash_input, phone_input],
-                    outputs=[code_status, auth_status_box]
-                )
-
-                login_btn.click(
-                    verify_code,
-                    inputs=[code_input, pwd_input],
-                    outputs=[login_status, auth_status_box]
-                )
-
-        demo.load(check_auth_status, outputs=[auth_status_box])
+        demo.load(fn=check_header_status, outputs=[header_status])
     return demo
 
 if __name__ == "__main__":
-    app = build_ui()
-    available_port = find_available_port(7860, 7890)
-    print(f"🚀 Starting Telegram Auto-Sender Web App on http://127.0.0.1:{available_port} ...")
+    app = build_app()
+    port = find_available_port(7860, 7890)
+    print(f"🚀 Starting TeleSender Pro on http://127.0.0.1:{port}")
     
     launch_kwargs = {
         "server_name": "127.0.0.1",
@@ -538,7 +512,7 @@ if __name__ == "__main__":
         "css": CUSTOM_CSS,
         "theme": gr.themes.Soft()
     }
-    if available_port != 0:
-        launch_kwargs["server_port"] = available_port
+    if port != 0:
+        launch_kwargs["server_port"] = port
         
     app.launch(**launch_kwargs)
