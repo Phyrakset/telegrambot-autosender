@@ -198,20 +198,27 @@ class TelegramService:
         self, 
         target_entity: Any, 
         message_text: str
-    ) -> Tuple[bool, Optional[str]]:
-        """Sends a direct message to a resolved Telegram user entity."""
+    ) -> Tuple[bool, str, str]:
+        """
+        Sends a direct message to a resolved Telegram user entity.
+        Returns: (success: bool, status_type: str, details_or_msg_id: str)
+        status_type can be: 'DELIVERED', 'PRIVACY_RESTRICTED', 'DEACTIVATED', 'FLOOD_LIMIT', 'ERROR'
+        """
         await self.connect()
         try:
             sent_msg = await self.client.send_message(target_entity, message_text)
-            return True, str(sent_msg.id)
-        except errors.FloodWaitError as e:
-            return False, f"FloodWaitError: {e.seconds}s"
-        except errors.PeerFloodError:
-            return False, "PeerFloodError: Restricted by Telegram Anti-Spam"
+            return True, "DELIVERED", str(sent_msg.id)
         except errors.UserPrivacyRestrictedError:
-            return False, "UserPrivacyRestrictedError: Blocked by user privacy settings"
+            return False, "PRIVACY_RESTRICTED", "Recipient privacy blocks stranger messages"
+        except (errors.UserDeactivatedError, errors.UserDeactivatedBanError):
+            return False, "DEACTIVATED", "Account has been deactivated"
+        except errors.PeerFloodError:
+            return False, "FLOOD_LIMIT", "Sender account rate limited by Telegram"
+        except errors.FloodWaitError as e:
+            return False, "FLOOD_WAIT", f"FloodWait: required wait {e.seconds}s"
         except Exception as e:
-            return False, str(e)
+            return False, "ERROR", str(e)
+
 
     def format_message_template(self, template: str, user_info: Optional[Dict[str, Any]] = None) -> str:
         """

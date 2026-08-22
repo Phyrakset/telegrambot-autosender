@@ -58,7 +58,7 @@ CUSTOM_CSS = """
 }
 .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 12px;
     margin-bottom: 16px;
 }
@@ -76,7 +76,7 @@ CUSTOM_CSS = """
     color: #94a3b8;
 }
 .kpi-value {
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 700;
     margin-top: 4px;
     color: #f8fafc;
@@ -116,7 +116,7 @@ def get_default_phone_list():
         "011223344\n095887766\n086445566\n069334455\n077123987"
     )
 
-def render_kpi_html(total: int = 20, registered: int = 0, delivered: int = 0, skipped: int = 0):
+def render_kpi_html(total: int = 19, registered: int = 0, delivered: int = 0, privacy_blocked: int = 0, unregistered: int = 0):
     return f"""
     <div class="kpi-grid">
         <div class="kpi-card" style="border-left: 3px solid #3b82f6;">
@@ -131,9 +131,13 @@ def render_kpi_html(total: int = 20, registered: int = 0, delivered: int = 0, sk
             <div class="kpi-label">Delivered Messages</div>
             <div class="kpi-value" style="color:#a78bfa;">{delivered}</div>
         </div>
+        <div class="kpi-card" style="border-left: 3px solid #f97316;">
+            <div class="kpi-label">Privacy Restricted</div>
+            <div class="kpi-value" style="color:#fb923c;">{privacy_blocked}</div>
+        </div>
         <div class="kpi-card" style="border-left: 3px solid #f59e0b;">
-            <div class="kpi-label">Skipped / Private</div>
-            <div class="kpi-value" style="color:#fbbf24;">{skipped}</div>
+            <div class="kpi-label">Unregistered Numbers</div>
+            <div class="kpi-value" style="color:#fbbf24;">{unregistered}</div>
         </div>
     </div>
     """
@@ -173,7 +177,7 @@ def set_stop():
     STOP_SIGNAL = True
     return "Stopping after current step..."
 
-# Core Batch Processor (Clean data, no icons in saved results)
+# Core Batch Processor with detailed Classification
 async def execute_batch(
     phone_text: str,
     country_code: str,
@@ -187,25 +191,25 @@ async def execute_batch(
     delay_s = max(0.0, float(delay_seconds or 2))
 
     if not phone_text or not phone_text.strip():
-        yield get_empty_df(), "Phone list is empty.", render_kpi_html(0, 0, 0, 0)
+        yield get_empty_df(), "Phone list is empty.", render_kpi_html(0, 0, 0, 0, 0)
         return
 
     lines = [line.strip() for line in phone_text.splitlines() if line.strip() and not line.startswith("#")]
     total = len(lines)
     if total == 0:
-        yield get_empty_df(), "No valid phone numbers found.", render_kpi_html(0, 0, 0, 0)
+        yield get_empty_df(), "No valid phone numbers found.", render_kpi_html(0, 0, 0, 0, 0)
         return
 
     try:
         await service.connect()
         if not await service.is_authenticated():
-            yield get_empty_df(), "Sender account not authenticated. Please log in on Account tab.", render_kpi_html(total, 0, 0, 0)
+            yield get_empty_df(), "Sender account not authenticated. Please log in on Account tab.", render_kpi_html(total, 0, 0, 0, 0)
             return
     except Exception as e:
-        yield get_empty_df(), f"Connection Error: {e}", render_kpi_html(total, 0, 0, 0)
+        yield get_empty_df(), f"Connection Error: {e}", render_kpi_html(total, 0, 0, 0, 0)
         return
 
-    # Pre-populate table rows without emojis
+    # Pre-populate table rows
     rows = []
     for i, raw in enumerate(lines, 1):
         e164 = format_phone_e164(raw, default_region=country_code)
@@ -219,73 +223,101 @@ async def execute_batch(
         })
 
     df = pd.DataFrame(rows)
-    stats = {"registered": 0, "delivered": 0, "skipped": 0, "failed": 0}
+    stats = {"registered": 0, "delivered": 0, "privacy_blocked": 0, "unregistered": 0, "failed": 0}
     
     action_label = "Auto-Sending from phone" if auto_send else "Checking registrations"
-    yield df, f"Starting {action_label} for {total} target numbers (Delay: {delay_s}s)...", render_kpi_html(total, 0, 0, 0)
+    yield df, f"Starting {action_label} for {total} target numbers (Delay: {delay_s}s)...", render_kpi_html(total, 0, 0, 0, 0)
 
     for idx, raw in enumerate(lines):
         if STOP_SIGNAL:
-            yield df, f"Halted by user at #{idx}/{total}.", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+            yield df, f"Halted by user at #{idx}/{total}.", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
             return
 
         e164 = format_phone_e164(raw, default_region=country_code)
         df.at[idx, "Registration"] = "Checking..."
         df.at[idx, "Details"] = "Querying MTProto..."
-        yield df, f"Processing [{idx + 1}/{total}]: {e164}", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+        yield df, f"Processing [{idx + 1}/{total}]: {e164}", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
 
         try:
             is_reg, info, user_entity = await service.check_phone_registration(e164, cleanup_contact=False)
             if is_reg and info:
                 stats["registered"] += 1
+                
+                is_deleted = info.get("is_deleted", False)
+                is_bot = info.get("is_bot", False)
                 first_n = info.get('first_name', '').strip()
                 last_n = info.get('last_name', '').strip()
                 full_n = f"{first_n} {last_n}".strip()
                 uname = f"@{info['username']}" if info.get('username') else ""
 
-                if full_n and full_n != "TempCheck":
-                    recipient_str = f"{full_n} ({uname})" if uname else full_n
-                elif uname:
-                    recipient_str = uname
+                if is_deleted:
+                    reg_status = "Deleted Account"
+                    recipient_str = f"Deleted User (ID: {info['id']})"
+                elif is_bot:
+                    reg_status = "Bot Account"
+                    recipient_str = f"Bot {uname or info['id']}"
                 else:
-                    recipient_str = f"User ID: {info['id']}"
+                    reg_status = "Registered"
+                    if full_n and full_n != "TempCheck":
+                        recipient_str = f"{full_n} ({uname})" if uname else full_n
+                    elif uname:
+                        recipient_str = uname
+                    else:
+                        recipient_str = f"User ID: {info['id']}"
 
-                df.at[idx, "Registration"] = "Registered"
+                df.at[idx, "Registration"] = reg_status
                 df.at[idx, "Recipient"] = recipient_str
 
-                if auto_send and user_entity:
-                    df.at[idx, "Delivery Status"] = "Sending..."
-                    yield df, f"Sending message to {recipient_str}...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+                if auto_send:
+                    if is_deleted:
+                        df.at[idx, "Delivery Status"] = "Skipped"
+                        df.at[idx, "Details"] = "Account was deleted by user"
+                        await service.delete_contact(info["id"])
+                    elif user_entity:
+                        df.at[idx, "Delivery Status"] = "Sending..."
+                        yield df, f"Sending message to {recipient_str}...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
 
-                    final_msg = service.format_message_template(message_text, user_info=info)
-                    success, detail = await service.send_message_to_user(user_entity, final_msg)
+                        final_msg = service.format_message_template(message_text, user_info=info)
+                        success, status_type, detail = await service.send_message_to_user(user_entity, final_msg)
 
-                    if success:
-                        stats["delivered"] += 1
-                        df.at[idx, "Delivery Status"] = "Delivered"
-                        df.at[idx, "Details"] = f"Msg ID: {detail}"
-                    else:
-                        stats["failed"] += 1
-                        df.at[idx, "Delivery Status"] = "Failed"
-                        df.at[idx, "Details"] = str(detail)
+                        if success:
+                            stats["delivered"] += 1
+                            df.at[idx, "Delivery Status"] = "Delivered"
+                            df.at[idx, "Details"] = f"Msg ID: {detail}"
+                        elif status_type == "PRIVACY_RESTRICTED":
+                            stats["privacy_blocked"] += 1
+                            df.at[idx, "Delivery Status"] = "Privacy Restricted"
+                            df.at[idx, "Details"] = "Blocked: User privacy blocks non-contact messages"
+                        elif status_type == "DEACTIVATED":
+                            df.at[idx, "Delivery Status"] = "Deactivated"
+                            df.at[idx, "Details"] = "Account is inactive or deactivated"
+                        elif status_type == "FLOOD_LIMIT":
+                            stats["failed"] += 1
+                            df.at[idx, "Delivery Status"] = "Flood Limited"
+                            df.at[idx, "Details"] = detail
+                        else:
+                            stats["failed"] += 1
+                            df.at[idx, "Delivery Status"] = "Failed"
+                            df.at[idx, "Details"] = detail
 
-                    await service.delete_contact(info["id"])
+                        await service.delete_contact(info["id"])
 
-                    # Delay between sends
-                    if idx < total - 1 and delay_s > 0:
-                        df.at[idx, "Details"] = f"Delivered (Waiting {delay_s}s)"
-                        yield df, f"Waiting {delay_s}s before next contact...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
-                        await asyncio.sleep(delay_s)
+                        # Delay between sends
+                        if idx < total - 1 and delay_s > 0:
+                            if success:
+                                df.at[idx, "Details"] = f"Delivered (Waiting {delay_s}s)"
+                            yield df, f"Waiting {delay_s}s before next contact...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
+                            await asyncio.sleep(delay_s)
                 else:
                     df.at[idx, "Delivery Status"] = "Verified"
                     df.at[idx, "Details"] = f"ID: {info['id']}"
                     await service.delete_contact(info["id"])
                     await asyncio.sleep(0.5)
             else:
-                stats["skipped"] += 1
+                stats["unregistered"] += 1
                 df.at[idx, "Registration"] = "Unregistered"
                 df.at[idx, "Delivery Status"] = "Skipped"
-                df.at[idx, "Details"] = "Not found / hidden"
+                df.at[idx, "Details"] = "Number not registered on Telegram"
                 await asyncio.sleep(0.3)
 
         except Exception as err:
@@ -294,7 +326,7 @@ async def execute_batch(
             df.at[idx, "Delivery Status"] = "Error"
             df.at[idx, "Details"] = str(err)
 
-        yield df, f"Completed {idx + 1} of {total} numbers", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+        yield df, f"Completed {idx + 1} of {total} numbers", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
 
     # Export clean CSV
     try:
@@ -302,8 +334,12 @@ async def execute_batch(
     except Exception:
         pass
 
-    summary = f"Campaign Finished: Checked {total} numbers · {stats['registered']} registered · {stats['delivered']} messages sent."
-    yield df, summary, render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+    summary = (
+        f"Campaign Finished: {total} numbers checked · "
+        f"{stats['registered']} registered ({stats['delivered']} delivered, {stats['privacy_blocked']} privacy restricted) · "
+        f"{stats['unregistered']} unregistered."
+    )
+    yield df, summary, render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
 
 # Async Handlers
 async def on_start_autosend(phone_text, country, msg, delay_val):
@@ -338,9 +374,13 @@ async def on_single_send(phone_str, msg, country):
         if not is_reg or not entity:
             return f"Cannot send: {e164} is not registered."
         final_msg = service.format_message_template(msg, user_info=info)
-        ok, res = await service.send_message_to_user(entity, final_msg)
+        ok, status_type, res = await service.send_message_to_user(entity, final_msg)
         await service.delete_contact(info["id"])
-        return f"Sent successfully! (Message ID: {res})" if ok else f"Failed: {res}"
+        if ok:
+            return f"Sent successfully! (Message ID: {res})"
+        elif status_type == "PRIVACY_RESTRICTED":
+            return f"Cannot Send: Recipient privacy settings block stranger messages."
+        return f"Failed ({status_type}): {res}"
     except Exception as e:
         return f"Send Error: {e}"
 
@@ -397,7 +437,7 @@ def build_app():
         with gr.Tabs():
             # Main Tab: Campaign Automation
             with gr.Tab("🚀 Broadcast Campaign"):
-                kpi_box = gr.HTML(render_kpi_html(20, 0, 0, 0))
+                kpi_box = gr.HTML(render_kpi_html(19, 0, 0, 0, 0))
 
                 with gr.Row():
                     # Left Column: Configuration & Actions
