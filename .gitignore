@@ -1,0 +1,39 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+
+# Telegram Telethon Session Files (Contains login tokens / credentials)
+*.session
+*.session-journal
+*.session.sqlite
+telebot_session.session
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local Output Data & Private Contact Lists
+phone-list.txt
+check_results.json
+auto_send_results.json
+*.log
+
+# Editor & OS Metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

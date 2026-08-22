@@ -1,0 +1,6 @@
+# Add phone numbers below (one per line).
+# Both local formats (e.g. 0968271451) and international formats (+855968271451) are supported.
+09342252
+0183910978
+0968271451
+087225303
