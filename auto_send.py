@@ -16,18 +16,17 @@ from telegram_service import TelegramService
 init(autoreset=True)
 load_dotenv()
 
-DEFAULT_MESSAGE = "Hello! 👋 Thank you for connecting with us.\nTo get immediate support and start chatting with our official assistant, please tap the link below:\n👉 {bot_link}"
+DEFAULT_MESSAGE = "Hello! This is an official follow-up message. Please let us know if you need any assistance."
 
 async def run_auto_send(
     phone_file: str = "phone-list.txt",
     message_template: str = DEFAULT_MESSAGE,
-    bot_link: str = "",
     default_country: str = "KH",
     min_delay: int = 15,
     max_delay: int = 35
 ):
     print(f"\n{Fore.CYAN}╔══════════════════════════════════════════════════════════════════╗")
-    print(f"{Fore.CYAN}║     🚀 TELEGRAM AUTO-MESSENGER FOR REGISTERED PHONES             ║")
+    print(f"{Fore.CYAN}║     🚀 TELEGRAM DIRECT OUTREACH (PHONE TO PHONE SENDER)          ║")
     print(f"{Fore.CYAN}╚══════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}\n")
 
     if not os.path.exists(phone_file):
@@ -36,11 +35,9 @@ async def run_auto_send(
 
     numbers = load_phone_numbers(phone_file, default_region=default_country)
     total_count = len(numbers)
-    print(f"📁 Target File: {Fore.YELLOW}{phone_file}{Style.RESET_ALL} ({total_count} phone numbers loaded)")
-    print(f"⏱️ Safety Jitter Delay: {Fore.YELLOW}{min_delay}s - {max_delay}s{Style.RESET_ALL} between messages")
-    if bot_link:
-        print(f"🤖 Bot Redirect Link: {Fore.CYAN}{bot_link}{Style.RESET_ALL}")
-    print(f"💬 Message Template:\n{Fore.LIGHTBLACK_EX}--- Start Message ---\n{message_template}\n--- End Message ---{Style.RESET_ALL}\n")
+    print(f"📁 Target Numbers File : {Fore.YELLOW}{phone_file}{Style.RESET_ALL} ({total_count} numbers loaded)")
+    print(f"⏱️ Safety Jitter Delay  : {Fore.YELLOW}{min_delay}s - {max_delay}s{Style.RESET_ALL} between messages")
+    print(f"💬 Message Content     :\n{Fore.LIGHTBLACK_EX}--- Message Start ---\n{message_template}\n--- Message End ---{Style.RESET_ALL}\n")
 
     service = TelegramService()
     try:
@@ -49,7 +46,7 @@ async def run_auto_send(
             print(f"{Fore.RED}❌ Error: Telegram session is not authorized. Please run 'python app.py' to log in first.{Style.RESET_ALL}")
             return
         me = await service.get_me_info()
-        print(f"👤 Sender Account: {Fore.GREEN}{me['first_name']} {me['last_name']} (@{me['username'] or 'NoUsername'}){Style.RESET_ALL} | ID: {me['id']}\n")
+        print(f"📱 Active Sender Phone : {Fore.GREEN}{me['first_name']} {me['last_name']} (@{me['username'] or 'NoUsername'}){Style.RESET_ALL} | ID: {me['id']}\n")
     except Exception as e:
         print(f"{Fore.RED}❌ Connection error: {e}{Style.RESET_ALL}")
         return
@@ -74,7 +71,6 @@ async def run_auto_send(
         print(f"[{index:02d}/{total_count:02d}] 🔍 Checking {Fore.BLUE}{e164}{Style.RESET_ALL} (raw: {raw})... ", end="", flush=True)
 
         try:
-            # Check registration without deleting immediately so we retain target entity
             is_reg, info, user_entity = await service.check_phone_registration(e164, cleanup_contact=False)
             
             if is_reg and user_entity:
@@ -83,10 +79,9 @@ async def run_auto_send(
                 username = f"@{info['username']}" if info['username'] else "-"
                 print(f"{Fore.GREEN}[REGISTERED]{Style.RESET_ALL} -> {name} ({username})")
 
-                # Format personalized message
-                final_msg = service.format_message_template(message_template, user_info=info, bot_link=bot_link)
+                final_msg = service.format_message_template(message_template, user_info=info)
                 
-                print(f"       ✉️ Dispatching message... ", end="", flush=True)
+                print(f"       ✉️ Sending message from phone... ", end="", flush=True)
                 success, status_info = await service.send_message_to_user(user_entity, final_msg)
 
                 if success:
@@ -147,7 +142,6 @@ async def run_auto_send(
                     "details": "Not found / privacy restricted",
                     "timestamp": datetime.now().isoformat()
                 })
-                # Small 1s pacing pause for non-registered
                 if index < total_count:
                     await asyncio.sleep(1.0)
 
@@ -170,14 +164,12 @@ async def run_auto_send(
 
     elapsed = (datetime.now() - start_time).total_seconds()
 
-    # Display clean summary table
     print("\n" + tabulate(
         table_rows,
         headers=["#", "Phone (E.164)", "Registered?", "Name", "Username", "Delivery", "Details"],
         tablefmt="grid"
     ))
 
-    # Print summary metrics box
     print(f"\n{Fore.GREEN}══════════════════════════════════════════════════════════════════")
     print(f"📊 EXECUTION SUMMARY REPORT")
     print(f"══════════════════════════════════════════════════════════════════{Style.RESET_ALL}")
@@ -190,7 +182,6 @@ async def run_auto_send(
     print(f"• Total Elapsed Time    : {Fore.CYAN}{elapsed:.1f} seconds{Style.RESET_ALL}")
     print(f"{Fore.GREEN}══════════════════════════════════════════════════════════════════{Style.RESET_ALL}\n")
 
-    # Export to JSON and CSV
     output_json = "auto_send_results.json"
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
@@ -207,10 +198,9 @@ async def run_auto_send(
     await service.disconnect()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Telegram Auto-Sender to Registered Phone Numbers")
+    parser = argparse.ArgumentParser(description="Telegram Phone-to-Phone Auto-Sender")
     parser.add_argument("file", nargs="?", default="phone-list.txt", help="Path to phone numbers text file")
     parser.add_argument("--msg", default=DEFAULT_MESSAGE, help="Custom message text")
-    parser.add_argument("--bot-link", default="", help="Telegram Bot link (e.g. https://t.me/MyCompanyBot)")
     parser.add_argument("--country", default=os.getenv("DEFAULT_COUNTRY", "KH"), help="Default ISO country code (e.g. KH)")
     parser.add_argument("--min-delay", type=int, default=int(os.getenv("MIN_DELAY_SECONDS", "15")), help="Min delay seconds")
     parser.add_argument("--max-delay", type=int, default=int(os.getenv("MAX_DELAY_SECONDS", "35")), help="Max delay seconds")
@@ -221,7 +211,6 @@ if __name__ == "__main__":
         asyncio.run(run_auto_send(
             phone_file=args.file,
             message_template=args.msg,
-            bot_link=args.bot_link,
             default_country=args.country,
             min_delay=args.min_delay,
             max_delay=args.max_delay

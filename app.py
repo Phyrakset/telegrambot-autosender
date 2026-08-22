@@ -17,10 +17,9 @@ load_dotenv()
 service = TelegramService()
 STOP_SIGNAL = False
 
-DEFAULT_BOT_MESSAGE = (
-    "Hello! 👋 Thank you for reaching out.\n"
-    "To start chatting with our official assistant, tap the link below:\n"
-    "👉 {bot_link}"
+DEFAULT_OUTREACH_MESSAGE = (
+    "Hello! This is an official follow-up message regarding our services. "
+    "Please let us know if you have any questions or need assistance."
 )
 
 CUSTOM_CSS = """
@@ -153,7 +152,7 @@ async def check_header_status():
                 return f"""
                 <div class="status-pill" style="border: 1px solid #059669; background: #064e3b; color: #a7f3d0;">
                     <span style="height:8px;width:8px;border-radius:50%;background:#10b981;display:inline-block;"></span>
-                    <span>{name} ({uname})</span>
+                    <span>Sender Phone: {name} ({uname})</span>
                 </div>
                 """
         return """
@@ -174,20 +173,18 @@ def set_stop():
     STOP_SIGNAL = True
     return "🛑 Stopping after current step..."
 
-# Core Batch Processor
+# Core Batch Processor (Direct Phone-to-Phone)
 async def execute_batch(
     phone_text: str,
     country_code: str,
     auto_send: bool,
     message_text: str,
-    bot_link: str,
     min_delay: int,
     max_delay: int
 ):
     global STOP_SIGNAL
     STOP_SIGNAL = False
 
-    cols = ["#", "Phone (E.164)", "Registration", "Recipient", "Delivery Status", "Details"]
     if not phone_text or not phone_text.strip():
         yield get_empty_df(), "⚠️ Phone list is empty.", render_kpi_html(0, 0, 0, 0)
         return
@@ -201,7 +198,7 @@ async def execute_batch(
     try:
         await service.connect()
         if not await service.is_authenticated():
-            yield get_empty_df(), "❌ Not logged in. Please authenticate in Account Settings tab first.", render_kpi_html(total, 0, 0, 0)
+            yield get_empty_df(), "❌ Sender account not authenticated. Please log in on Account tab.", render_kpi_html(total, 0, 0, 0)
             return
     except Exception as e:
         yield get_empty_df(), f"❌ Connection Error: {e}", render_kpi_html(total, 0, 0, 0)
@@ -223,12 +220,12 @@ async def execute_batch(
     df = pd.DataFrame(rows)
     stats = {"registered": 0, "delivered": 0, "skipped": 0, "failed": 0}
     
-    action_label = "Auto-Sending messages" if auto_send else "Checking registrations"
-    yield df, f"⚡ Starting campaign: {action_label} for {total} numbers...", render_kpi_html(total, 0, 0, 0)
+    action_label = "Auto-Sending from phone" if auto_send else "Checking registrations"
+    yield df, f"⚡ Starting {action_label} for {total} target numbers...", render_kpi_html(total, 0, 0, 0)
 
     for idx, raw in enumerate(lines):
         if STOP_SIGNAL:
-            yield df, f"🛑 Campaign stopped by user at #{idx}/{total}.", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+            yield df, f"🛑 Halted by user at #{idx}/{total}.", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
             return
 
         e164 = format_phone_e164(raw, default_region=country_code)
@@ -250,7 +247,7 @@ async def execute_batch(
                     df.at[idx, "Delivery Status"] = "🚀 Sending..."
                     yield df, f"Sending message to {name}...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
-                    final_msg = service.format_message_template(message_text, user_info=info, bot_link=bot_link)
+                    final_msg = service.format_message_template(message_text, user_info=info)
                     success, detail = await service.send_message_to_user(user_entity, final_msg)
 
                     if success:
@@ -290,7 +287,6 @@ async def execute_batch(
 
         yield df, f"Completed {idx + 1} of {total} numbers", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
-    # Auto-export CSV
     try:
         df.to_csv("auto_send_results.csv", index=False, encoding="utf-8-sig")
     except Exception:
@@ -299,13 +295,13 @@ async def execute_batch(
     summary = f"🎉 Campaign Finished! Checked {total} numbers · {stats['registered']} registered · {stats['delivered']} messages sent."
     yield df, summary, render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
-# Async Handlers for Buttons
-async def on_start_autosend(phone_text, country, msg, bot_link, min_d, max_d):
-    async for item in execute_batch(phone_text, country, True, msg, bot_link, min_d, max_d):
+# Async Handlers
+async def on_start_autosend(phone_text, country, msg, min_d, max_d):
+    async for item in execute_batch(phone_text, country, True, msg, min_d, max_d):
         yield item
 
-async def on_start_verify_only(phone_text, country, msg, bot_link, min_d, max_d):
-    async for item in execute_batch(phone_text, country, False, "", "", 0, 0):
+async def on_start_verify_only(phone_text, country, msg, min_d, max_d):
+    async for item in execute_batch(phone_text, country, False, "", 0, 0):
         yield item
 
 # Tab 2 Single Lookups
@@ -323,7 +319,7 @@ async def on_single_lookup(phone_str, country):
     except Exception as e:
         return f"⚠️ Error: {e}"
 
-async def on_single_send(phone_str, msg, bot_link, country):
+async def on_single_send(phone_str, msg, country):
     if not phone_str or not msg:
         return "Phone number and message are required."
     e164 = format_phone_e164(phone_str, default_region=country)
@@ -331,7 +327,7 @@ async def on_single_send(phone_str, msg, bot_link, country):
         is_reg, info, entity = await service.check_phone_registration(e164, cleanup_contact=False)
         if not is_reg or not entity:
             return f"❌ Cannot send: `{e164}` is not registered."
-        final_msg = service.format_message_template(msg, user_info=info, bot_link=bot_link)
+        final_msg = service.format_message_template(msg, user_info=info)
         ok, res = await service.send_message_to_user(entity, final_msg)
         await service.delete_contact(info["id"])
         return f"✅ **Sent successfully!** (Message ID: `{res}`)" if ok else f"❌ **Failed**: {res}"
@@ -374,7 +370,7 @@ def build_app():
                     <div class="app-brand">
                         <div>
                             <div class="app-title">⚡ TeleSender Pro</div>
-                            <div class="app-subtitle">Automated Lead Qualifier & Telegram Direct Outreach</div>
+                            <div class="app-subtitle">Direct Phone-to-Phone Lead Outreach & Registration Checker</div>
                         </div>
                     </div>
                     """
@@ -383,7 +379,7 @@ def build_app():
                 header_status = gr.HTML(
                     """
                     <div class="status-pill">
-                        <span>Checking session...</span>
+                        <span>Checking sender phone...</span>
                     </div>
                     """
                 )
@@ -407,22 +403,17 @@ def build_app():
                                 reload_btn = gr.Button("🔄 Load 20 Test Numbers", size="sm", scale=1)
 
                             phone_input = gr.Textbox(
-                                label="Phone Numbers", 
+                                label="Target Phone Numbers", 
                                 value=get_default_phone_list(), 
-                                lines=7,
+                                lines=8,
                                 placeholder="Paste phone numbers (one per line)..."
                             )
 
                         with gr.Group():
-                            bot_link_input = gr.Textbox(
-                                label="Official Bot Link", 
-                                value="https://t.me/YourOfficialBot",
-                                placeholder="https://t.me/YourBot"
-                            )
                             msg_input = gr.Textbox(
-                                label="Message Template", 
-                                value=DEFAULT_BOT_MESSAGE, 
-                                lines=3
+                                label="Outreach Message Content", 
+                                value=DEFAULT_OUTREACH_MESSAGE, 
+                                lines=4
                             )
 
                         with gr.Row():
@@ -450,13 +441,13 @@ def build_app():
                 
                 send_btn.click(
                     fn=on_start_autosend,
-                    inputs=[phone_input, batch_country, msg_input, bot_link_input, min_delay, max_delay],
+                    inputs=[phone_input, batch_country, msg_input, min_delay, max_delay],
                     outputs=[table_output, status_ticker, kpi_box]
                 )
 
                 verify_btn.click(
                     fn=on_start_verify_only,
-                    inputs=[phone_input, batch_country, msg_input, bot_link_input, min_delay, max_delay],
+                    inputs=[phone_input, batch_country, msg_input, min_delay, max_delay],
                     outputs=[table_output, status_ticker, kpi_box]
                 )
 
@@ -472,13 +463,12 @@ def build_app():
                         s_result = gr.Markdown()
                     
                     with gr.Column():
-                        s_bot = gr.Textbox(label="Bot Link", value="https://t.me/YourOfficialBot")
-                        s_msg = gr.Textbox(label="Message", value=DEFAULT_BOT_MESSAGE, lines=3)
+                        s_msg = gr.Textbox(label="Message", value=DEFAULT_OUTREACH_MESSAGE, lines=3)
                         s_send_btn = gr.Button("✉️ Send Message", variant="secondary")
                         s_send_res = gr.Markdown()
 
                 s_check_btn.click(fn=on_single_lookup, inputs=[s_phone, s_country], outputs=[s_result])
-                s_send_btn.click(fn=on_single_send, inputs=[s_phone, s_msg, s_bot, s_country], outputs=[s_send_res])
+                s_send_btn.click(fn=on_single_send, inputs=[s_phone, s_msg, s_country], outputs=[s_send_res])
 
             # Tab 3: Account & Session
             with gr.Tab("⚙️ Account & Login"):

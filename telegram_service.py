@@ -213,24 +213,21 @@ class TelegramService:
         except Exception as e:
             return False, str(e)
 
-    def format_message_template(self, template: str, user_info: Optional[Dict[str, Any]] = None, bot_link: str = "") -> str:
+    def format_message_template(self, template: str, user_info: Optional[Dict[str, Any]] = None) -> str:
         """
         Renders message template with optional variables:
-        - {name}: user's first name or 'Valued Customer'
-        - {username}: @username or ''
-        - {bot_link}: official bot URL
+        - {name}: recipient first name or 'Valued Customer'
+        - {username}: recipient @username or ''
         """
-        first_name = (user_info.get("first_name") if user_info else "") or "Valued Customer"
+        if not template:
+            return ""
+        first_name = (user_info.get("first_name") if user_info else "") or ""
         username = f"@{user_info.get('username')}" if (user_info and user_info.get("username")) else ""
         
         msg = template.replace("{name}", first_name).replace("{username}", username)
-        if "{bot_link}" in msg:
-            msg = msg.replace("{bot_link}", bot_link.strip())
-        elif bot_link.strip() and bot_link.strip() not in msg:
-            # If bot_link is specified but not in template, append nicely
-            msg = f"{msg.strip()}\n\n👉 Chat with our Assistant: {bot_link.strip()}"
         return msg.strip()
 
     async def disconnect(self):
         if self.client and self.client.is_connected():
             await self.client.disconnect()
+
