@@ -28,6 +28,7 @@ htmlcov/
 phone-list.txt
 check_results.json
 auto_send_results.json
+*.csv
 *.log
 
 # Editor & OS Metadata
