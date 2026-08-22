@@ -110,7 +110,7 @@ def get_default_phone_list():
         with open("phone-list.txt", "r", encoding="utf-8") as f:
             return f.read().strip()
     return (
-        "0968271451\n0183910978\n09342252\n087225303\n012345678\n"
+        "0968271451\n09342252\n087225303\n012345678\n"
         "010889922\n0977123456\n0885544332\n070998877\n092112233\n"
         "016554433\n098776655\n089223344\n060123456\n0719876543\n"
         "011223344\n095887766\n086445566\n069334455\n077123987"
@@ -164,16 +164,16 @@ async def check_header_status():
     except Exception:
         return """
         <div class="status-pill" style="border: 1px solid #d97706; background: #451a03; color: #fde68a;">
-            <span>⚠️ Session Offline</span>
+            <span>Session Offline</span>
         </div>
         """
 
 def set_stop():
     global STOP_SIGNAL
     STOP_SIGNAL = True
-    return "🛑 Stopping after current step..."
+    return "Stopping after current step..."
 
-# Core Batch Processor (Direct Phone-to-Phone)
+# Core Batch Processor (Clean data, no icons in saved results)
 async def execute_batch(
     phone_text: str,
     country_code: str,
@@ -187,32 +187,32 @@ async def execute_batch(
     delay_s = max(0.0, float(delay_seconds or 2))
 
     if not phone_text or not phone_text.strip():
-        yield get_empty_df(), "⚠️ Phone list is empty.", render_kpi_html(0, 0, 0, 0)
+        yield get_empty_df(), "Phone list is empty.", render_kpi_html(0, 0, 0, 0)
         return
 
     lines = [line.strip() for line in phone_text.splitlines() if line.strip() and not line.startswith("#")]
     total = len(lines)
     if total == 0:
-        yield get_empty_df(), "⚠️ No valid phone numbers found.", render_kpi_html(0, 0, 0, 0)
+        yield get_empty_df(), "No valid phone numbers found.", render_kpi_html(0, 0, 0, 0)
         return
 
     try:
         await service.connect()
         if not await service.is_authenticated():
-            yield get_empty_df(), "❌ Sender account not authenticated. Please log in on Account tab.", render_kpi_html(total, 0, 0, 0)
+            yield get_empty_df(), "Sender account not authenticated. Please log in on Account tab.", render_kpi_html(total, 0, 0, 0)
             return
     except Exception as e:
-        yield get_empty_df(), f"❌ Connection Error: {e}", render_kpi_html(total, 0, 0, 0)
+        yield get_empty_df(), f"Connection Error: {e}", render_kpi_html(total, 0, 0, 0)
         return
 
-    # Pre-populate table rows
+    # Pre-populate table rows without emojis
     rows = []
     for i, raw in enumerate(lines, 1):
         e164 = format_phone_e164(raw, default_region=country_code)
         rows.append({
             "#": i,
             "Phone (E.164)": e164,
-            "Registration": "⏳ Queued",
+            "Registration": "Queued",
             "Recipient": "-",
             "Delivery Status": "Pending" if auto_send else "Queued",
             "Details": ""
@@ -222,15 +222,15 @@ async def execute_batch(
     stats = {"registered": 0, "delivered": 0, "skipped": 0, "failed": 0}
     
     action_label = "Auto-Sending from phone" if auto_send else "Checking registrations"
-    yield df, f"⚡ Starting {action_label} for {total} target numbers (Delay: {delay_s}s)...", render_kpi_html(total, 0, 0, 0)
+    yield df, f"Starting {action_label} for {total} target numbers (Delay: {delay_s}s)...", render_kpi_html(total, 0, 0, 0)
 
     for idx, raw in enumerate(lines):
         if STOP_SIGNAL:
-            yield df, f"🛑 Halted by user at #{idx}/{total}.", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+            yield df, f"Halted by user at #{idx}/{total}.", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
             return
 
         e164 = format_phone_e164(raw, default_region=country_code)
-        df.at[idx, "Registration"] = "🔍 Checking..."
+        df.at[idx, "Registration"] = "Checking..."
         df.at[idx, "Details"] = "Querying MTProto..."
         yield df, f"Processing [{idx + 1}/{total}]: {e164}", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
@@ -238,26 +238,35 @@ async def execute_batch(
             is_reg, info, user_entity = await service.check_phone_registration(e164, cleanup_contact=False)
             if is_reg and info:
                 stats["registered"] += 1
-                name = f"{info['first_name']} {info['last_name']}".strip()
-                uname = f"@{info['username']}" if info['username'] else "-"
-                
-                df.at[idx, "Registration"] = "✅ Registered"
-                df.at[idx, "Recipient"] = f"{name} ({uname})"
+                first_n = info.get('first_name', '').strip()
+                last_n = info.get('last_name', '').strip()
+                full_n = f"{first_n} {last_n}".strip()
+                uname = f"@{info['username']}" if info.get('username') else ""
+
+                if full_n and full_n != "TempCheck":
+                    recipient_str = f"{full_n} ({uname})" if uname else full_n
+                elif uname:
+                    recipient_str = uname
+                else:
+                    recipient_str = f"User ID: {info['id']}"
+
+                df.at[idx, "Registration"] = "Registered"
+                df.at[idx, "Recipient"] = recipient_str
 
                 if auto_send and user_entity:
-                    df.at[idx, "Delivery Status"] = "🚀 Sending..."
-                    yield df, f"Sending message to {name}...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
+                    df.at[idx, "Delivery Status"] = "Sending..."
+                    yield df, f"Sending message to {recipient_str}...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
                     final_msg = service.format_message_template(message_text, user_info=info)
                     success, detail = await service.send_message_to_user(user_entity, final_msg)
 
                     if success:
                         stats["delivered"] += 1
-                        df.at[idx, "Delivery Status"] = "✅ Delivered"
-                        df.at[idx, "Details"] = f"Msg #{detail}"
+                        df.at[idx, "Delivery Status"] = "Delivered"
+                        df.at[idx, "Details"] = f"Msg ID: {detail}"
                     else:
                         stats["failed"] += 1
-                        df.at[idx, "Delivery Status"] = "❌ Failed"
+                        df.at[idx, "Delivery Status"] = "Failed"
                         df.at[idx, "Details"] = str(detail)
 
                     await service.delete_contact(info["id"])
@@ -274,25 +283,26 @@ async def execute_batch(
                     await asyncio.sleep(0.5)
             else:
                 stats["skipped"] += 1
-                df.at[idx, "Registration"] = "❌ Unregistered"
-                df.at[idx, "Delivery Status"] = "⏭️ Skipped"
+                df.at[idx, "Registration"] = "Unregistered"
+                df.at[idx, "Delivery Status"] = "Skipped"
                 df.at[idx, "Details"] = "Not found / hidden"
                 await asyncio.sleep(0.3)
 
         except Exception as err:
             stats["failed"] += 1
-            df.at[idx, "Registration"] = "⚠️ Error"
+            df.at[idx, "Registration"] = "Error"
             df.at[idx, "Delivery Status"] = "Error"
             df.at[idx, "Details"] = str(err)
 
         yield df, f"Completed {idx + 1} of {total} numbers", render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
+    # Export clean CSV
     try:
         df.to_csv("auto_send_results.csv", index=False, encoding="utf-8-sig")
     except Exception:
         pass
 
-    summary = f"🎉 Campaign Finished! Checked {total} numbers · {stats['registered']} registered · {stats['delivered']} messages sent."
+    summary = f"Campaign Finished: Checked {total} numbers · {stats['registered']} registered · {stats['delivered']} messages sent."
     yield df, summary, render_kpi_html(total, stats["registered"], stats["delivered"], stats["skipped"])
 
 # Async Handlers
@@ -314,10 +324,10 @@ async def on_single_lookup(phone_str, country):
         if is_reg and info:
             name = f"{info['first_name']} {info['last_name']}".strip()
             uname = f"@{info['username']}" if info['username'] else "None"
-            return f"✅ **Registered**: {name} ({uname}) · ID: `{info['id']}` · Activity: `{info['status']}`"
-        return f"❌ **Not Registered / Private**: `{e164}`"
+            return f"Registered: {name} ({uname}) · ID: {info['id']} · Activity: {info['status']}"
+        return f"Not Registered / Private: {e164}"
     except Exception as e:
-        return f"⚠️ Error: {e}"
+        return f"Error: {e}"
 
 async def on_single_send(phone_str, msg, country):
     if not phone_str or not msg:
@@ -326,13 +336,13 @@ async def on_single_send(phone_str, msg, country):
     try:
         is_reg, info, entity = await service.check_phone_registration(e164, cleanup_contact=False)
         if not is_reg or not entity:
-            return f"❌ Cannot send: `{e164}` is not registered."
+            return f"Cannot send: {e164} is not registered."
         final_msg = service.format_message_template(msg, user_info=info)
         ok, res = await service.send_message_to_user(entity, final_msg)
         await service.delete_contact(info["id"])
-        return f"✅ **Sent successfully!** (Message ID: `{res}`)" if ok else f"❌ **Failed**: {res}"
+        return f"Sent successfully! (Message ID: {res})" if ok else f"Failed: {res}"
     except Exception as e:
-        return f"⚠️ Send Error: {e}"
+        return f"Send Error: {e}"
 
 # Tab 3 Login Handlers
 async def on_request_code(api_id, api_hash, phone):
@@ -346,7 +356,7 @@ async def on_request_code(api_id, api_hash, phone):
     service.reload_env()
     service.client = None
     ok, msg = await service.send_auth_code(phone)
-    status_text = f"✅ {msg}" if ok else f"❌ {msg}"
+    status_text = f"{msg}" if ok else f"Error: {msg}"
     return status_text, await check_header_status()
 
 async def on_verify_login(code, pwd):
@@ -355,10 +365,10 @@ async def on_verify_login(code, pwd):
     ok, msg, needs_pwd = await service.sign_in_with_code(code, pwd)
     badge = await check_header_status()
     if ok:
-        return f"✅ {msg}", badge
+        return f"{msg}", badge
     elif needs_pwd:
-        return f"⚠️ {msg}", badge
-    return f"❌ {msg}", badge
+        return f"{msg}", badge
+    return f"Error: {msg}", badge
 
 def build_app():
     with gr.Blocks(title="TeleSender Pro") as demo:
@@ -400,7 +410,7 @@ def build_app():
                                     value="KH",
                                     scale=1
                                 )
-                                reload_btn = gr.Button("🔄 Load 20 Test Numbers", size="sm", scale=1)
+                                reload_btn = gr.Button("🔄 Load Numbers List", size="sm", scale=1)
 
                             phone_input = gr.Textbox(
                                 label="Target Phone Numbers", 
@@ -424,9 +434,9 @@ def build_app():
                         )
 
                         with gr.Row():
-                            send_btn = gr.Button("🚀 Start Auto-Send", variant="primary", scale=2)
-                            verify_btn = gr.Button("🔍 Verify Only", variant="secondary", scale=1)
-                            stop_btn = gr.Button("⏹ Stop", variant="stop", scale=1)
+                            send_btn = gr.Button("Start Auto-Send", variant="primary", scale=2)
+                            verify_btn = gr.Button("Verify Only", variant="secondary", scale=1)
+                            stop_btn = gr.Button("Stop", variant="stop", scale=1)
 
                     # Right Column: Clean Live Data Table
                     with gr.Column(scale=6):
@@ -462,12 +472,12 @@ def build_app():
                     with gr.Column():
                         s_phone = gr.Textbox(label="Phone Number", value="0968271451")
                         s_country = gr.Dropdown(label="Country", choices=["KH", "US", "TH", "VN"], value="KH")
-                        s_check_btn = gr.Button("🔍 Check Registration", variant="primary")
+                        s_check_btn = gr.Button("Check Registration", variant="primary")
                         s_result = gr.Markdown()
                     
                     with gr.Column():
                         s_msg = gr.Textbox(label="Message", value=DEFAULT_OUTREACH_MESSAGE, lines=3)
-                        s_send_btn = gr.Button("✉️ Send Message", variant="secondary")
+                        s_send_btn = gr.Button("Send Message", variant="secondary")
                         s_send_res = gr.Markdown()
 
                 s_check_btn.click(fn=on_single_lookup, inputs=[s_phone, s_country], outputs=[s_result])
@@ -479,13 +489,13 @@ def build_app():
                     api_id = gr.Textbox(label="API ID", value=os.getenv("TELEGRAM_API_ID", ""))
                     api_hash = gr.Textbox(label="API Hash", value=os.getenv("TELEGRAM_API_HASH", ""), type="password")
                 phone_num = gr.Textbox(label="Sender Phone", value=os.getenv("TELEGRAM_PHONE", "+855"))
-                req_btn = gr.Button("📲 Request Login Code")
+                req_btn = gr.Button("Request Login Code")
                 req_status = gr.Markdown()
 
                 with gr.Row():
                     code_in = gr.Textbox(label="Verification Code")
                     pwd_in = gr.Textbox(label="2FA Password", type="password")
-                login_btn = gr.Button("🔓 Authenticate Session")
+                login_btn = gr.Button("Authenticate Session")
                 login_res = gr.Markdown()
 
                 req_btn.click(fn=on_request_code, inputs=[api_id, api_hash, phone_num], outputs=[req_status, header_status])
