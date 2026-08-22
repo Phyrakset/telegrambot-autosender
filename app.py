@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import socket
 import random
 import asyncio
 import pandas as pd
@@ -22,6 +23,26 @@ DEFAULT_BOT_MESSAGE = (
     "👉 {bot_link}"
 )
 
+CUSTOM_CSS = """
+.gradio-container { max-width: 1200px !important; margin: auto; }
+.header-banner { background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%); color: white; padding: 22px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.header-title { font-size: 26px; font-weight: 800; margin: 0; }
+.header-sub { font-size: 14px; opacity: 0.9; margin-top: 6px; }
+.kpi-container { margin-bottom: 15px; }
+.preview-box { background: #0f172a; color: #38bdf8; border: 1px solid #334155; border-radius: 8px; padding: 12px; }
+"""
+
+def find_available_port(start_port: int = 7860, max_port: int = 7890) -> int:
+    """Finds the first available port in the given range."""
+    for port in range(start_port, max_port + 1):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    return 0  # 0 lets OS allocate any random free port
+
 def get_20_sample_numbers():
     if os.path.exists("phone-list.txt"):
         with open("phone-list.txt", "r", encoding="utf-8") as f:
@@ -35,7 +56,6 @@ def get_20_sample_numbers():
 
 def render_kpi_cards(total, registered, sent, skipped, failed, is_running=False):
     reg_pct = (registered / total * 100) if total > 0 else 0
-    status_pill = '<span style="background:#10b981;color:white;padding:3px 8px;border-radius:12px;font-size:12px;">ACTIVE</span>' if is_running else '<span style="background:#64748b;color:white;padding:3px 8px;border-radius:12px;font-size:12px;">IDLE</span>'
     return f"""
     <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:12px;margin-bottom:15px;">
         <div style="background:#1e293b;color:#f8fafc;padding:14px;border-radius:10px;border-left:4px solid #3b82f6;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
@@ -74,7 +94,7 @@ async def check_auth_status():
                     f"- **Sender Profile**: **{name}** ({username})\n"
                     f"- **Account ID**: `{me['id']}` | **Phone**: `{me['phone']}`"
                 )
-        return "### 🔴 **Not Authenticated** — Please log in using the *Telegram Login* tab."
+        return "### 🔴 **Not Authenticated** — Please log in using the *Telegram Account & Credentials* tab."
     except Exception as e:
         return f"### ⚠️ **Connection Notice**: {str(e)}"
 
@@ -315,16 +335,7 @@ async def handle_single_send(phone_str, message_text, bot_link, country_code):
 
 # UI Construction
 def build_ui():
-    custom_css = """
-    .gradio-container { max-width: 1200px !important; margin: auto; }
-    .header-banner { background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%); color: white; padding: 22px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-    .header-title { font-size: 26px; font-weight: 800; margin: 0; }
-    .header-sub { font-size: 14px; opacity: 0.9; margin-top: 6px; }
-    .kpi-container { margin-bottom: 15px; }
-    .preview-box { background: #0f172a; color: #38bdf8; border: 1px solid #334155; border-radius: 8px; padding: 12px; }
-    """
-
-    with gr.Blocks(title="Telegram Auto-Messenger & Lead Qualifier", css=custom_css, theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(title="Telegram Auto-Messenger & Lead Qualifier") as demo:
         gr.HTML(
             """
             <div class="header-banner">
@@ -518,4 +529,16 @@ def build_ui():
 
 if __name__ == "__main__":
     app = build_ui()
-    app.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True)
+    available_port = find_available_port(7860, 7890)
+    print(f"🚀 Starting Telegram Auto-Sender Web App on http://127.0.0.1:{available_port} ...")
+    
+    launch_kwargs = {
+        "server_name": "127.0.0.1",
+        "inbrowser": True,
+        "css": CUSTOM_CSS,
+        "theme": gr.themes.Soft()
+    }
+    if available_port != 0:
+        launch_kwargs["server_port"] = available_port
+        
+    app.launch(**launch_kwargs)
