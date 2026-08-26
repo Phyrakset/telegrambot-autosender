@@ -46,7 +46,7 @@ async def run_check(phone_file: str = "phone-list.txt", default_country: str = "
                 last_n = info.get('last_name', '')
                 full_n = f"{first_n} {last_n}".strip()
                 uname = f"@{info['username']}" if info.get('username') else "-"
-                disp_name = full_n if (full_n and full_n != "TempCheck") else "-"
+                disp_name = full_n if full_n else (uname if uname != "-" else "-")
 
                 print(f"{Fore.GREEN}[REGISTERED]{Style.RESET_ALL} - {disp_name} ({uname})")
                 table_rows.append([

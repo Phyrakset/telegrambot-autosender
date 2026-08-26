@@ -30,6 +30,9 @@ check_results.json
 auto_send_results.json
 *.csv
 *.log
+voice_records/
+video/*_backup.mp4
+video/*_crf*.mp4
 
 # Editor & OS Metadata
 .vscode/
