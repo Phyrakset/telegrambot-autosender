@@ -1,8 +1,20 @@
 import os
+import sys
 import socket
 import asyncio
 import pandas as pd
 import gradio as gr
+from telethon import custom, errors
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 
 from src.telebot.config import config, AppConfig
 from src.telebot.utils.phone import format_phone_e164
@@ -11,10 +23,7 @@ from src.telebot.core.service import TelegramService
 service = TelegramService()
 STOP_SIGNAL = False
 
-DEFAULT_OUTREACH_MESSAGE = (
-    "Hello! This is an official follow-up message regarding our services. "
-    "Please let us know if you have any questions or need assistance."
-)
+DEFAULT_OUTREACH_MESSAGE = config.tverkar_initial_message
 
 CUSTOM_CSS = """
 /* Modern SaaS Minimalist Theme */
@@ -98,53 +107,69 @@ def find_available_port(start_port: int = 7860, max_port: int = 7890) -> int:
                 continue
     return 0
 
-def get_default_phone_list():
-    if os.path.exists("phone-list.txt"):
-        with open("phone-list.txt", "r", encoding="utf-8") as f:
-            return f.read().strip()
-    return (
-        "0968271451\n09342252\n087225303\n012345678\n"
-        "010889922\n0977123456\n0885544332\n070998877\n092112233\n"
-        "016554433\n098776655\n089223344\n060123456\n0719876543\n"
-        "011223344\n095887766\n086445566\n069334455\n077123987"
-    )
+def get_default_phone_list() -> str:
+    for candidate in ["phone-list.txt", "phone-list.example.txt"]:
+        if os.path.exists(candidate):
+            with open(candidate, "r", encoding="utf-8") as f:
+                return f.read().strip()
+    return ""
 
-def render_kpi_html(total: int = 19, registered: int = 0, delivered: int = 0, privacy_blocked: int = 0, unregistered: int = 0):
+def get_empty_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=["#", "Phone (E.164)", "Registration", "Recipient", "Delivery Status", "Reason"])
+
+def get_tverkar_df() -> pd.DataFrame:
+    if os.path.exists(config.tverkar_results_csv):
+        try:
+            return pd.read_csv(config.tverkar_results_csv, encoding="utf-8-sig")
+        except Exception:
+            pass
+    return pd.DataFrame(columns=[
+        "Index", "Timestamp", "Phone (E.164)", "Candidate Name", "Username",
+        "Consent Transfer", "Employment Status", "Job Preference / Urgency",
+        "Expected Salary", "Preferred Location", "Campaign Status", "Notes"
+    ])
+
+def get_survey_df() -> pd.DataFrame:
+    if os.path.exists(config.survey_results_csv):
+        try:
+            return pd.read_csv(config.survey_results_csv, encoding="utf-8-sig")
+        except Exception:
+            pass
+    return pd.DataFrame(columns=["#", "timestamp", "phone_e164", "name", "q1_answer", "q2_answer", "q3_answer", "survey_status", "reason"])
+
+def render_kpi_html(total: int, reg: int, sent: int, privacy: int, unreg: int) -> str:
     return f"""
     <div class="kpi-grid">
-        <div class="kpi-card" style="border-left: 3px solid #3b82f6;">
-            <div class="kpi-label">Target Numbers</div>
-            <div class="kpi-value">{total}</div>
+        <div class="kpi-card">
+            <div class="kpi-label">Total Numbers</div>
+            <div class="kpi-value" style="color: #60a5fa;">{total}</div>
         </div>
-        <div class="kpi-card" style="border-left: 3px solid #10b981;">
+        <div class="kpi-card">
             <div class="kpi-label">Registered Accounts</div>
-            <div class="kpi-value" style="color:#34d399;">{registered}</div>
+            <div class="kpi-value" style="color: #34d399;">{reg}</div>
         </div>
-        <div class="kpi-card" style="border-left: 3px solid #8b5cf6;">
-            <div class="kpi-label">Delivered Messages</div>
-            <div class="kpi-value" style="color:#a78bfa;">{delivered}</div>
+        <div class="kpi-card">
+            <div class="kpi-label">Delivered / Sent</div>
+            <div class="kpi-value" style="color: #a78bfa;">{sent}</div>
         </div>
-        <div class="kpi-card" style="border-left: 3px solid #f97316;">
+        <div class="kpi-card">
             <div class="kpi-label">Privacy Restricted</div>
-            <div class="kpi-value" style="color:#fb923c;">{privacy_blocked}</div>
+            <div class="kpi-value" style="color: #fbbf24;">{privacy}</div>
         </div>
-        <div class="kpi-card" style="border-left: 3px solid #f59e0b;">
-            <div class="kpi-label">Unregistered Numbers</div>
-            <div class="kpi-value" style="color:#fbbf24;">{unregistered}</div>
+        <div class="kpi-card">
+            <div class="kpi-label">Unregistered</div>
+            <div class="kpi-value" style="color: #94a3b8;">{unreg}</div>
         </div>
     </div>
     """
 
-def get_empty_df():
-    return pd.DataFrame(columns=["#", "Phone (E.164)", "Registration", "Recipient", "Delivery Status", "Details"])
-
-async def check_header_status():
+async def check_header_status() -> str:
     try:
         if await service.is_authenticated():
             me = await service.get_me_info()
             if me:
                 name = f"{me['first_name']} {me['last_name']}".strip()
-                uname = f"@{me['username']}" if me['username'] else f"+{me['phone']}"
+                uname = f"@{me['username']}" if me['username'] else "NoUser"
                 return f"""
                 <div class="status-pill" style="border: 1px solid #059669; background: #064e3b; color: #a7f3d0;">
                     <span style="height:8px;width:8px;border-radius:50%;background:#10b981;display:inline-block;"></span>
@@ -169,37 +194,43 @@ def set_stop():
     STOP_SIGNAL = True
     return "Stopping after current step..."
 
-# Core Batch Processor
+# Core Batch Processor (Dedicated TverKar Campaign)
 async def execute_batch(
     phone_text: str,
     country_code: str,
-    auto_send: bool,
-    message_text: str,
-    delay_seconds: float
+    auto_send: bool = True,
+    message_text: str = "",
+    delay_s: float = 2.0,
+    video_path: Optional[str] = None,
+    survey_timeout: int = 180
 ):
     global STOP_SIGNAL
     STOP_SIGNAL = False
     
-    delay_s = max(0.0, float(delay_seconds or 2))
-
-    if not phone_text or not phone_text.strip():
-        yield get_empty_df(), "Phone list is empty.", render_kpi_html(0, 0, 0, 0, 0)
-        return
-
-    lines = [line.strip() for line in phone_text.splitlines() if line.strip() and not line.startswith("#")]
+    lines = [line.strip() for line in phone_text.splitlines() if line.strip() and not line.strip().startswith("#")]
     total = len(lines)
     if total == 0:
-        yield get_empty_df(), "No valid phone numbers found.", render_kpi_html(0, 0, 0, 0, 0)
+        yield get_empty_df(), "Error: No valid phone numbers provided.", render_kpi_html(0, 0, 0, 0, 0)
         return
 
     try:
-        await service.connect()
-        if not await service.is_authenticated():
-            yield get_empty_df(), "Sender account not authenticated. Please log in on Account tab.", render_kpi_html(total, 0, 0, 0, 0)
+        yield get_empty_df(), "Connecting to Telegram MTProto...", render_kpi_html(total, 0, 0, 0, 0)
+        is_auth = await service.is_authenticated()
+        if not is_auth:
+            yield get_empty_df(), "Error: Telegram account is NOT logged in. Go to Settings tab to login first.", render_kpi_html(total, 0, 0, 0, 0)
             return
     except Exception as e:
-        yield get_empty_df(), f"Connection Error: {e}", render_kpi_html(total, 0, 0, 0, 0)
+        yield get_empty_df(), f"Connection Error: {str(e)}", render_kpi_html(total, 0, 0, 0, 0)
         return
+
+    # Cache Video Asset
+    cached_media = None
+    if auto_send and video_path and os.path.exists(video_path):
+        try:
+            yield get_empty_df(), f"Uploading & caching video '{video_path}' to Telegram...", render_kpi_html(total, 0, 0, 0, 0)
+            cached_media = await service.upload_and_cache_video(video_path)
+        except Exception:
+            pass
 
     rows = []
     for i, raw in enumerate(lines, 1):
@@ -207,16 +238,26 @@ async def execute_batch(
         rows.append({
             "#": i,
             "Phone (E.164)": e164,
-            "Registration": "Queued",
-            "Recipient": "-",
-            "Delivery Status": "Pending" if auto_send else "Queued",
-            "Details": ""
+            "Candidate": "-",
+            "Consent": "Queued",
+            "Employment": "-",
+            "Urgency / Change": "-",
+            "Expected Salary": "-",
+            "Location": "-",
+            "Status": "Pending" if auto_send else "Queued"
         })
 
     df = pd.DataFrame(rows)
-    stats = {"registered": 0, "delivered": 0, "privacy_blocked": 0, "unregistered": 0, "failed": 0}
+    tverkar_campaign_results = []
+    if os.path.exists(config.tverkar_results_csv):
+        try:
+            existing_df = pd.read_csv(config.tverkar_results_csv, encoding="utf-8-sig")
+            tverkar_campaign_results = existing_df.to_dict(orient="records")
+        except Exception:
+            tverkar_campaign_results = []
+    stats = {"registered": 0, "delivered": 0, "privacy_blocked": 0, "unregistered": 0, "failed": 0, "survey_done": 0}
     
-    action_label = "Auto-Sending from phone" if auto_send else "Checking registrations"
+    action_label = "Running TverKar Outreach & Survey" if auto_send else "Checking registrations"
     yield df, f"Starting {action_label} for {total} target numbers (Delay: {delay_s}s)...", render_kpi_html(total, 0, 0, 0, 0)
 
     for idx, raw in enumerate(lines):
@@ -225,115 +266,97 @@ async def execute_batch(
             return
 
         e164 = format_phone_e164(raw, default_region=country_code)
-        df.at[idx, "Registration"] = "Checking..."
-        df.at[idx, "Details"] = "Querying MTProto..."
-        yield df, f"Processing [{idx + 1}/{total}]: {e164}", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
-
+        df.at[idx, "Status"] = "Checking..."
         try:
             is_reg, info, user_entity = await service.check_phone_registration(e164, cleanup_contact=False)
             if is_reg and info:
                 stats["registered"] += 1
+                full_n = f"{info.get('first_name', '')} {info.get('last_name', '')}".strip()
+                uname = f"@{info.get('username')}" if info.get('username') else ""
+                recipient_str = full_n or uname or f"User ID: {info['id']}"
                 
-                is_deleted = info.get("is_deleted", False)
-                is_bot = info.get("is_bot", False)
-                first_n = info.get('first_name', '').strip()
-                last_n = info.get('last_name', '').strip()
-                full_n = f"{first_n} {last_n}".strip()
-                uname = f"@{info['username']}" if info.get('username') else ""
-
-                if is_deleted:
-                    reg_status = "Deleted Account"
-                    recipient_str = f"Deleted User (ID: {info['id']})"
-                elif is_bot:
-                    reg_status = "Bot Account"
-                    recipient_str = f"Bot {uname or info['id']}"
-                else:
-                    reg_status = "Registered"
-                    if full_n and full_n != "TempCheck":
-                        recipient_str = f"{full_n} ({uname})" if uname else full_n
-                    elif uname:
-                        recipient_str = uname
-                    else:
-                        recipient_str = f"User ID: {info['id']}"
-
-                df.at[idx, "Registration"] = reg_status
-                df.at[idx, "Recipient"] = recipient_str
+                df.at[idx, "Candidate"] = recipient_str
 
                 if auto_send:
-                    if is_deleted:
-                        df.at[idx, "Delivery Status"] = "Skipped"
-                        df.at[idx, "Details"] = "Account was deleted by user"
-                        await service.delete_contact(info["id"])
-                    elif user_entity:
-                        df.at[idx, "Delivery Status"] = "Sending..."
-                        yield df, f"Sending message to {recipient_str}...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
+                    df.at[idx, "Status"] = "Sending & Surveying..."
+                    final_msg = service.format_message_template(message_text, user_info=info)
 
-                        final_msg = service.format_message_template(message_text, user_info=info)
-                        success, status_type, detail = await service.send_message_to_user(user_entity, final_msg)
+                    yield df, f"Engaging TverKar campaign with {recipient_str}...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
+                    
+                    survey_ok, answers, survey_reason = await service.conduct_tverkar_campaign_session(
+                        user_entity,
+                        initial_message=final_msg,
+                        media=cached_media,
+                        timeout=int(survey_timeout or 180),
+                        phone_identifier=e164,
+                        user_info=info
+                    )
 
-                        if success:
-                            stats["delivered"] += 1
-                            df.at[idx, "Delivery Status"] = "Delivered"
-                            df.at[idx, "Details"] = f"Msg ID: {detail}"
-                        elif status_type == "PRIVACY_RESTRICTED":
-                            stats["privacy_blocked"] += 1
-                            df.at[idx, "Delivery Status"] = "Privacy Restricted"
-                            df.at[idx, "Details"] = "Blocked: User privacy blocks non-contact messages"
-                        elif status_type == "DEACTIVATED":
-                            df.at[idx, "Delivery Status"] = "Deactivated"
-                            df.at[idx, "Details"] = "Account is inactive or deactivated"
-                        elif status_type == "FLOOD_LIMIT":
-                            stats["failed"] += 1
-                            df.at[idx, "Delivery Status"] = "Flood Limited"
-                            df.at[idx, "Details"] = detail
-                        else:
-                            stats["failed"] += 1
-                            df.at[idx, "Delivery Status"] = "Failed"
-                            df.at[idx, "Details"] = detail
+                    stats["delivered"] += 1
+                    df.at[idx, "Consent"] = answers.get("consent", "Agreed" if survey_ok else "Declined")
+                    df.at[idx, "Employment"] = answers.get("employment_status", "-")
+                    df.at[idx, "Urgency / Change"] = answers.get("job_preference", "-")
+                    df.at[idx, "Expected Salary"] = answers.get("expected_salary", "-")
+                    df.at[idx, "Location"] = answers.get("preferred_location", "-")
+                    
+                    if survey_ok:
+                        stats["survey_done"] += 1
+                        df.at[idx, "Status"] = "Completed"
+                    else:
+                        df.at[idx, "Status"] = f"Incomplete ({survey_reason})"
 
-                        await service.delete_contact(info["id"])
-
-                        # Delay between sends
-                        if idx < total - 1 and delay_s > 0:
-                            if success:
-                                df.at[idx, "Details"] = f"Delivered (Waiting {delay_s}s)"
-                            yield df, f"Waiting {delay_s}s before next contact...", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
-                            await asyncio.sleep(delay_s)
-                else:
-                    df.at[idx, "Delivery Status"] = "Verified"
-                    df.at[idx, "Details"] = f"ID: {info['id']}"
+                    tverkar_campaign_results.append({
+                        "Index": idx + 1,
+                        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "Phone (E.164)": e164,
+                        "Raw Phone": raw,
+                        "Candidate Name": recipient_str,
+                        "Username": uname,
+                        "User ID": info.get("id"),
+                        "Consent Transfer": answers.get("consent", ""),
+                        "Employment Status": answers.get("employment_status", ""),
+                        "Job Preference / Urgency": answers.get("job_preference", ""),
+                        "Expected Salary": answers.get("expected_salary", ""),
+                        "Preferred Location": answers.get("preferred_location", ""),
+                        "Voice Notes": "; ".join(answers.get("voice_files", [])),
+                        "Dialogue Summary": " | ".join(answers.get("raw_dialogue", [])),
+                        "Campaign Status": "Completed" if survey_ok else "Incomplete",
+                        "Notes": survey_reason
+                    })
+                    
+                    # Persist CSV in real-time
+                    try:
+                        tver_df = pd.DataFrame(tverkar_campaign_results)
+                        tver_df.to_csv(config.tverkar_results_csv, index=False, encoding="utf-8-sig")
+                    except Exception:
+                        pass
+                    
                     await service.delete_contact(info["id"])
-                    await asyncio.sleep(0.5)
             else:
                 stats["unregistered"] += 1
-                df.at[idx, "Registration"] = "Unregistered"
-                df.at[idx, "Delivery Status"] = "Skipped"
-                df.at[idx, "Details"] = "Number not registered on Telegram"
-                await asyncio.sleep(0.3)
+                df.at[idx, "Candidate"] = "-"
+                df.at[idx, "Consent"] = "-"
+                df.at[idx, "Employment"] = "-"
+                df.at[idx, "Urgency / Change"] = "-"
+                df.at[idx, "Expected Salary"] = "-"
+                df.at[idx, "Location"] = "-"
+                df.at[idx, "Status"] = "Unregistered"
+        except errors.FloodWaitError as e:
+            df.at[idx, "Status"] = f"FloodWait: {e.seconds}s"
+            break
+        except Exception as e:
+            df.at[idx, "Status"] = f"Error: {str(e)}"
+            
+        yield df, f"Completed [{idx + 1}/{total}]", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
+        if idx < total - 1 and delay_s > 0 and auto_send:
+            await asyncio.sleep(delay_s)
 
-        except Exception as err:
-            stats["failed"] += 1
-            df.at[idx, "Registration"] = "Error"
-            df.at[idx, "Delivery Status"] = "Error"
-            df.at[idx, "Details"] = str(err)
-
-        yield df, f"Completed {idx + 1} of {total} numbers", render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
-
-    try:
-        df.to_csv(config.results_csv, index=False, encoding="utf-8-sig")
-    except Exception:
-        pass
-
-    summary = (
-        f"Campaign Finished: {total} numbers checked · "
-        f"{stats['registered']} registered ({stats['delivered']} delivered, {stats['privacy_blocked']} privacy restricted) · "
-        f"{stats['unregistered']} unregistered."
-    )
+    summary = f"🎉 Campaign Finished! Registered: {stats['registered']} | Delivered: {stats['delivered']}"
     yield df, summary, render_kpi_html(total, stats["registered"], stats["delivered"], stats["privacy_blocked"], stats["unregistered"])
 
 # Async Handlers
-async def on_start_autosend(phone_text, country, msg, delay_val):
-    async for item in execute_batch(phone_text, country, True, msg, delay_val):
+async def on_start_autosend(phone_text, country, msg, delay_val, video_p, timeout_val):
+    async for item in execute_batch(phone_text, country, True, msg, delay_val, video_path=video_p, survey_timeout=timeout_val):
         yield item
 
 async def on_start_verify_only(phone_text, country, msg, delay_val):
@@ -355,24 +378,34 @@ async def on_single_lookup(phone_str, country):
     except Exception as e:
         return f"Error: {e}"
 
-async def on_single_send(phone_str, msg, country):
-    if not phone_str or not msg:
-        return "Phone number and message are required."
+async def on_single_send(phone_str, msg, country, video_path=""):
+    if not phone_str:
+        return "Phone number is required."
     e164 = format_phone_e164(phone_str, default_region=country)
     try:
+        await service.connect()
         is_reg, info, entity = await service.check_phone_registration(e164, cleanup_contact=False)
         if not is_reg or not entity:
-            return f"Cannot send: {e164} is not registered."
-        final_msg = service.format_message_template(msg, user_info=info)
-        ok, status_type, res = await service.send_message_to_user(entity, final_msg)
+            return f"❌ Cannot send: {e164} is not registered on Telegram."
+        
+        final_msg = service.format_message_template(msg or "", user_info=info)
+
+        if video_path and os.path.exists(video_path.strip()):
+            cached_media = await service.upload_and_cache_video(video_path.strip())
+            ok, status_type, res = await service.send_media_to_user(entity, cached_media, caption=final_msg)
+        else:
+            ok, status_type, res = await service.send_message_to_user(entity, final_msg)
+
         await service.delete_contact(info["id"])
         if ok:
-            return f"Sent successfully! (Message ID: {res})"
+            media_tag = " (with Video)" if (video_path and os.path.exists(video_path.strip())) else ""
+            return f"✅ Sent successfully{media_tag}! (Message ID: {res}) to {info.get('first_name', '')} ({e164})"
         elif status_type == "PRIVACY_RESTRICTED":
-            return f"Cannot Send: Recipient privacy settings block stranger messages."
-        return f"Failed ({status_type}): {res}"
+            return f"⚠️ Cannot Send: Recipient privacy settings block stranger messages/media."
+        return f"❌ Failed ({status_type}): {res}"
     except Exception as e:
-        return f"Send Error: {e}"
+        return f"❌ Send Error: {e}"
+
 
 # Tab 3 Login Handlers
 async def on_request_code(api_id, api_hash, phone):
@@ -410,7 +443,7 @@ def build_app():
                     <div class="app-brand">
                         <div>
                             <div class="app-title">⚡ TeleSender Pro</div>
-                            <div class="app-subtitle">Direct Phone-to-Phone Lead Outreach & Registration Checker</div>
+                            <div class="app-subtitle">Direct Phone-to-Phone Lead Outreach, Video Sender & Survey Suite</div>
                         </div>
                     </div>
                     """
@@ -425,12 +458,12 @@ def build_app():
                 )
 
         with gr.Tabs():
-            # Main Tab: Campaign Automation
-            with gr.Tab("🚀 Broadcast Campaign"):
+            # Main Tab: Dedicated TverKar Campaign
+            with gr.Tab("🚀 TverKar Outreach & Survey Campaign"):
                 kpi_box = gr.HTML(render_kpi_html(19, 0, 0, 0, 0))
 
                 with gr.Row():
-                    # Left Column: Configuration & Actions
+                    # Left Column: Target Numbers & Message Settings
                     with gr.Column(scale=4):
                         with gr.Group():
                             with gr.Row():
@@ -445,36 +478,50 @@ def build_app():
                             phone_input = gr.Textbox(
                                 label="Target Phone Numbers", 
                                 value=get_default_phone_list(), 
-                                lines=8,
+                                lines=5,
                                 placeholder="Paste phone numbers (one per line)..."
                             )
 
                         with gr.Group():
+                            video_input = gr.Textbox(
+                                label="🎬 1-Tap Video Asset (2.69 MB Compressed)",
+                                value=config.default_video_path,
+                                placeholder="video/TverKar&WN_using.mp4"
+                            )
                             msg_input = gr.Textbox(
-                                label="Outreach Message Content", 
+                                label="Outreach Message Caption (Supports [ឈ្មោះបេក្ខជន])", 
                                 value=DEFAULT_OUTREACH_MESSAGE, 
-                                lines=4
+                                lines=7
                             )
 
-                        delay_input = gr.Number(
-                            label="Delay Between Messages (seconds)", 
-                            value=2, 
-                            precision=0, 
-                            minimum=0
-                        )
+                        with gr.Row():
+                            delay_input = gr.Number(
+                                label="Anti-Flood Delay (s)", 
+                                value=2, 
+                                precision=0, 
+                                minimum=0,
+                                scale=1
+                            )
+                            timeout_box = gr.Number(
+                                label="Candidate Reply Timeout (s)", 
+                                value=180, 
+                                precision=0, 
+                                minimum=10,
+                                scale=1
+                            )
 
                         with gr.Row():
-                            send_btn = gr.Button("Start Auto-Send", variant="primary", scale=2)
-                            verify_btn = gr.Button("Verify Only", variant="secondary", scale=1)
+                            send_btn = gr.Button("🚀 Start Outreach Campaign", variant="primary", scale=2)
+                            verify_btn = gr.Button("Verify Numbers Only", variant="secondary", scale=1)
                             stop_btn = gr.Button("Stop", variant="stop", scale=1)
 
                     # Right Column: Clean Live Data Table
                     with gr.Column(scale=6):
-                        status_ticker = gr.Markdown("**Status**: Ready to launch.")
+                        status_ticker = gr.Markdown("**Status**: Ready to launch TverKar Outreach Campaign.")
                         table_output = gr.Dataframe(
                             value=get_empty_df(),
-                            headers=["#", "Phone (E.164)", "Registration", "Recipient", "Delivery Status", "Details"],
-                            datatype=["number", "str", "str", "str", "str", "str"],
+                            headers=["#", "Phone (E.164)", "Candidate", "Consent", "Employment", "Urgency / Change", "Expected Salary", "Location", "Status"],
+                            datatype=["number", "str", "str", "str", "str", "str", "str", "str", "str"],
                             interactive=False,
                             wrap=True
                         )
@@ -484,7 +531,10 @@ def build_app():
                 
                 send_btn.click(
                     fn=on_start_autosend,
-                    inputs=[phone_input, batch_country, msg_input, delay_input],
+                    inputs=[
+                        phone_input, batch_country, msg_input, delay_input,
+                        video_input, timeout_box
+                    ],
                     outputs=[table_output, status_ticker, kpi_box]
                 )
 
@@ -496,24 +546,41 @@ def build_app():
 
                 stop_btn.click(fn=set_stop, outputs=[status_ticker])
 
-            # Tab 2: Single Lookup
-            with gr.Tab("🔍 Single Lookup"):
+            # Tab 2: TverKar Candidate Responses Viewer
+            with gr.Tab("📊 Candidate Survey Responses"):
+                gr.Markdown("### 🎯 TverKar CV Transfer Responses (`tverkar_campaign_results.csv`)")
+                with gr.Row():
+                    refresh_tverkar_btn = gr.Button("🔄 Refresh Results Table", variant="primary")
+                tverkar_table = gr.Dataframe(
+                    value=get_tverkar_df(),
+                    interactive=False,
+                    wrap=True
+                )
+                refresh_tverkar_btn.click(fn=get_tverkar_df, outputs=[tverkar_table])
+
+            # Tab 3: Single Lookup & Test Send
+            with gr.Tab("🔍 Single Lookup & Direct Send"):
                 with gr.Row():
                     with gr.Column():
-                        s_phone = gr.Textbox(label="Phone Number", value="0968271451")
+                        s_phone = gr.Textbox(label="Phone Number to Test", value="0968271451")
                         s_country = gr.Dropdown(label="Country", choices=["KH", "US", "TH", "VN"], value="KH")
                         s_check_btn = gr.Button("Check Registration", variant="primary")
                         s_result = gr.Markdown()
                     
                     with gr.Column():
-                        s_msg = gr.Textbox(label="Message", value=DEFAULT_OUTREACH_MESSAGE, lines=3)
-                        s_send_btn = gr.Button("Send Message", variant="secondary")
+                        s_video = gr.Textbox(
+                            label="🎬 Video Path (Optional)",
+                            value=config.default_video_path,
+                            placeholder="e.g. video/TverKar&WN_using.mp4"
+                        )
+                        s_msg = gr.Textbox(label="Message / Video Caption", value=DEFAULT_OUTREACH_MESSAGE, lines=5)
+                        s_send_btn = gr.Button("🚀 Send Video & Text Now", variant="secondary")
                         s_send_res = gr.Markdown()
 
                 s_check_btn.click(fn=on_single_lookup, inputs=[s_phone, s_country], outputs=[s_result])
-                s_send_btn.click(fn=on_single_send, inputs=[s_phone, s_msg, s_country], outputs=[s_send_res])
+                s_send_btn.click(fn=on_single_send, inputs=[s_phone, s_msg, s_country, s_video], outputs=[s_send_res])
 
-            # Tab 3: Account & Session
+            # Tab 4: Account & Session
             with gr.Tab("⚙️ Account & Login"):
                 with gr.Row():
                     api_id = gr.Textbox(label="API ID", value=os.getenv("TELEGRAM_API_ID", ""))

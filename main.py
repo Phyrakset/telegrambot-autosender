@@ -21,11 +21,13 @@ def main():
     parser_check.add_argument("--country", default="KH", help="Default country ISO")
 
     # Command: send
-    parser_send = subparsers.add_parser("send", help="Auto-send messages to registered phones (CLI)")
+    parser_send = subparsers.add_parser("send", help="Auto-send TverKar video message & conduct interactive survey (CLI)")
     parser_send.add_argument("file", nargs="?", default="phone-list.txt", help="Phone list path")
-    parser_send.add_argument("--msg", default="Hello! This is an official follow-up message.", help="Message text")
+    parser_send.add_argument("--msg", default=None, help="Message caption (default: TverKar Khmer message)")
     parser_send.add_argument("--delay", type=int, default=2, help="Delay in seconds between messages")
     parser_send.add_argument("--country", default="KH", help="Default country ISO")
+    parser_send.add_argument("--video", default="video/TverKar&WN_using.mp4", help="Path to video file")
+    parser_send.add_argument("--timeout", type=int, default=180, help="Survey response timeout in seconds")
 
     # Top-level --ui flag for shortcut
     parser.add_argument("--ui", action="store_true", help="Launch Web UI directly")
@@ -42,7 +44,16 @@ def main():
     elif args.command == "send":
         import asyncio
         from src.telebot.cli.send import run_auto_send
-        asyncio.run(run_auto_send(args.file, args.msg, args.country, args.delay))
+        asyncio.run(run_auto_send(
+            phone_file=args.file,
+            message_template=args.msg,
+            default_country=args.country,
+            delay_seconds=args.delay,
+            video_path=args.video,
+            survey_timeout=args.timeout,
+            campaign_mode="tverkar"
+        ))
+
 
 if __name__ == "__main__":
     main()
