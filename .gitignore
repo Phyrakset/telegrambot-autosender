@@ -39,5 +39,8 @@ video/*_crf*.mp4
 .idea/
 *.swp
 *.swo
+*.lock
+~$*
 .DS_Store
 Thumbs.db
+
