@@ -19,8 +19,8 @@ class AppConfig:
     tverkar_results_csv: str = "tverkar_campaign_results.csv"
     default_video_path: str = os.getenv(
         "DEFAULT_VIDEO_PATH", 
-        "video/TverKar&WN_using.mp4" if os.path.exists("video/TverKar&WN_using.mp4") else (
-            "video/TverKar&WN_10MB.mp4" if os.path.exists("video/TverKar&WN_10MB.mp4") else "video/TverKar&WN.mp4"
+        "video/TverKar&WN_720p_crf30.mp4" if os.path.exists("video/TverKar&WN_720p_crf30.mp4") else (
+            "video/TverKar&WN_using.mp4" if os.path.exists("video/TverKar&WN_using.mp4") else "video/TverKar&WN.mp4"
         )
     )
     survey_timeout_seconds: int = int(os.getenv("SURVEY_TIMEOUT_SECONDS", "120"))
