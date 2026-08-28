@@ -32,7 +32,7 @@ auto_send_results.json
 *.log
 voice_records/
 video/*_backup.mp4
-video/*_crf*.mp4
+!video/TverKar&WN_720p_crf30.mp4
 
 # Editor & OS Metadata
 .vscode/

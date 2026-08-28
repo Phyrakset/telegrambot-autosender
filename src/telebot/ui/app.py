@@ -852,6 +852,59 @@ def build_app():
                     """
                 )
 
+            # Tab 4: Telegram Account & Authentication
+            with gr.Tab("📱 Telegram Account & Login"):
+                gr.Markdown("### 📱 Telegram Sender Account Management")
+                account_info_box = gr.HTML("<div style='color: #94a3b8;'>Loading account details...</div>")
+
+                with gr.Row():
+                    auth_phone_input = gr.Textbox(label="Sender Phone Number", value=config.phone, placeholder="+855XXXXXXXX")
+                    req_code_btn = gr.Button("📩 Request OTP Login Code", variant="primary")
+
+                with gr.Row():
+                    auth_code_input = gr.Textbox(label="Verification Code (OTP)", placeholder="Enter 5-digit code...")
+                    auth_pwd_input = gr.Textbox(label="2FA Password (if enabled)", type="password", placeholder="Enter 2FA password...")
+                    login_submit_btn = gr.Button("🔐 Sign In & Authenticate", variant="secondary")
+
+                auth_result_status = gr.Markdown("")
+
+                async def on_req_code(phone):
+                    ok, msg = await service.send_auth_code(phone.strip())
+                    return f"**Status:** {msg}"
+
+                async def get_account_status_html():
+                    try:
+                        if await service.is_authenticated():
+                            me = await service.get_me_info()
+                            if me:
+                                return f"""
+                                <div style='background: #064e3b; border: 1px solid #059669; padding: 14px; border-radius: 8px; color: #ecfdf5;'>
+                                    <div style='font-size: 16px; font-weight: 700;'>✅ Active Sender: {me['first_name']} {me['last_name']} (@{me.get('username') or 'NoUsername'})</div>
+                                    <div style='font-size: 13px; margin-top: 4px;'>Phone: <b>{me['phone']}</b> | Telegram User ID: <b>{me['id']}</b> | Premium: <b>{me.get('premium', False)}</b></div>
+                                </div>
+                                """
+                    except Exception:
+                        pass
+                    return """
+                    <div style='background: #450a0a; border: 1px solid #dc2626; padding: 14px; border-radius: 8px; color: #fef2f2;'>
+                        <div style='font-size: 16px; font-weight: 700;'>❌ Sender Account Not Logged In</div>
+                        <div style='font-size: 13px; margin-top: 4px;'>Please enter your phone number above and click 'Request OTP Login Code' to log in.</div>
+                    </div>
+                    """
+
+                async def on_sign_in(code, pwd):
+                    ok, msg, need_2fa = await service.sign_in_with_code(code.strip(), pwd.strip() if pwd else None)
+                    hdr = await check_header_status()
+                    acc_html = await get_account_status_html()
+                    return f"**Status:** {msg}", hdr, acc_html
+
+                req_code_btn.click(fn=on_req_code, inputs=[auth_phone_input], outputs=[auth_result_status])
+                login_submit_btn.click(
+                    fn=on_sign_in,
+                    inputs=[auth_code_input, auth_pwd_input],
+                    outputs=[auth_result_status, header_status, account_info_box]
+                )
+
         demo.load(fn=check_header_status, outputs=[header_status])
     return demo
 

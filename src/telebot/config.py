@@ -12,15 +12,18 @@ class AppConfig:
     default_country: str = os.getenv("DEFAULT_COUNTRY", "KH")
     min_delay_seconds: int = int(os.getenv("MIN_DELAY_SECONDS", "2"))
     max_delay_seconds: int = int(os.getenv("MAX_DELAY_SECONDS", "2"))
-    session_name: str = "telebot_session"
+    session_name: str = os.getenv(
+        "TELEGRAM_SESSION_NAME", 
+        f"telebot_session_{os.getenv('TELEGRAM_PHONE', '').replace('+', '')}" if os.getenv('TELEGRAM_PHONE') else "telebot_session"
+    )
     results_csv: str = "auto_send_results.csv"
     results_json: str = "auto_send_results.json"
     survey_results_csv: str = "survey_responses.csv"
     tverkar_results_csv: str = "tverkar_campaign_results.csv"
     default_video_path: str = os.getenv(
         "DEFAULT_VIDEO_PATH", 
-        "video/TverKar&WN_using.mp4" if os.path.exists("video/TverKar&WN_using.mp4") else (
-            "video/TverKar&WN_10MB.mp4" if os.path.exists("video/TverKar&WN_10MB.mp4") else "video/TverKar&WN.mp4"
+        "video/TverKar&WN_720p_crf30.mp4" if os.path.exists("video/TverKar&WN_720p_crf30.mp4") else (
+            "video/TverKar&WN_using.mp4" if os.path.exists("video/TverKar&WN_using.mp4") else "video/TverKar&WN.mp4"
         )
     )
     survey_timeout_seconds: int = int(os.getenv("SURVEY_TIMEOUT_SECONDS", "120"))
