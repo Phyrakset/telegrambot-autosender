@@ -142,7 +142,7 @@ class TelegramService:
         import random
         contact = types.InputPhoneContact(
             client_id=random.randint(100000, 999999999),
-            phone=phone_e164,
+            phone=phone_e164.replace("+", "").strip(),
             first_name=(candidate_name or "Candidate").strip() or "Candidate",
             last_name=""
         )
