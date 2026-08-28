@@ -12,7 +12,10 @@ class AppConfig:
     default_country: str = os.getenv("DEFAULT_COUNTRY", "KH")
     min_delay_seconds: int = int(os.getenv("MIN_DELAY_SECONDS", "2"))
     max_delay_seconds: int = int(os.getenv("MAX_DELAY_SECONDS", "2"))
-    session_name: str = "telebot_session"
+    session_name: str = os.getenv(
+        "TELEGRAM_SESSION_NAME", 
+        f"telebot_session_{os.getenv('TELEGRAM_PHONE', '').replace('+', '')}" if os.getenv('TELEGRAM_PHONE') else "telebot_session"
+    )
     results_csv: str = "auto_send_results.csv"
     results_json: str = "auto_send_results.json"
     survey_results_csv: str = "survey_responses.csv"
