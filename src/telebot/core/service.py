@@ -128,6 +128,7 @@ class TelegramService:
     async def check_phone_registration(
         self, 
         phone_e164: str, 
+        candidate_name: Optional[str] = None,
         cleanup_contact: bool = True
     ) -> Tuple[bool, Optional[Dict[str, Any]], Optional[Any]]:
         """
@@ -138,10 +139,11 @@ class TelegramService:
         if not await self.client.is_user_authorized():
             raise RuntimeError("Telegram session is not authorized. Please log in first.")
 
+        import random
         contact = types.InputPhoneContact(
-            client_id=0,
+            client_id=random.randint(100000, 999999999),
             phone=phone_e164,
-            first_name="",
+            first_name=(candidate_name or "Candidate").strip() or "Candidate",
             last_name=""
         )
 

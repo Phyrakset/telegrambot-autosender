@@ -165,7 +165,7 @@ async def run_auto_send(
         print(f"[{index:02d}/{total_count:02d}] Checking {Fore.BLUE}{e164}{Style.RESET_ALL} (raw: {raw})... ", end="", flush=True)
 
         try:
-            is_reg, info, user_entity = await service.check_phone_registration(e164, cleanup_contact=False)
+            is_reg, info, user_entity = await service.check_phone_registration(e164, candidate_name=known_name, cleanup_contact=False)
             
             if is_reg and info:
                 stats["registered"] += 1
