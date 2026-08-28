@@ -30,7 +30,10 @@ DEFAULT_MAPPINGS = {
     "+855968060054": "Kinhav",
     "855968060054": "Kinhav",
     "+85560593987": "song11777",
-    "85560593987": "song11777"
+    "85560593987": "song11777",
+    "+855183910978": "phyrakset",
+    "855183910978": "phyrakset",
+    "0183910978": "phyrakset"
 }
 
 class CandidateDirectoryResolver:
