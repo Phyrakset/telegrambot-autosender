@@ -527,7 +527,12 @@ async def execute_batch(
             df.at[idx, "Workingna Admin URL"] = admin_url
 
         try:
-            is_reg, info, user_entity = await service.check_phone_registration(e164, candidate_name=known_name, cleanup_contact=False)
+            is_reg, info, user_entity = await service.check_phone_registration(
+                phone_e164=e164, 
+                candidate_name=known_name, 
+                workingna_profile=workingna_profile,
+                cleanup_contact=False
+            )
             if is_reg and info:
                 stats["registered"] += 1
                 full_n = f"{info.get('first_name', '')} {info.get('last_name', '')}".strip()
