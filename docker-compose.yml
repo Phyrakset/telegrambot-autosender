@@ -9,7 +9,10 @@ services:
       - "7860:7860"
     volumes:
       - ./.env:/app/.env
+      - ./telebot_session_85593658007.session:/app/telebot_session_85593658007.session
       - ./telebot_session.session:/app/telebot_session.session
+      - ./survey_sessions.json:/app/survey_sessions.json
+      - ./candidate_resolver_cache.json:/app/candidate_resolver_cache.json
       - ./tverkar_campaign_results.csv:/app/tverkar_campaign_results.csv
       - ./all_Phone_barstar_service_cashair.xlsx:/app/all_Phone_barstar_service_cashair.xlsx
       - ./video:/app/video
