@@ -25,6 +25,29 @@ class AppConfig:
     )
     survey_timeout_seconds: int = int(os.getenv("SURVEY_TIMEOUT_SECONDS", "120"))
 
+    # Workingna MySQL Database Settings
+    workingna_db_host: str = os.getenv("WORKINGNA_DB_HOST", "127.0.0.1")
+    workingna_db_port: int = int(os.getenv("WORKINGNA_DB_PORT", "3306"))
+    workingna_db_user: str = os.getenv("WORKINGNA_DB_USER", "workingna")
+    workingna_db_password: str = os.getenv("WORKINGNA_DB_PASSWORD", "Workingna#123")
+    workingna_db_name: str = os.getenv("WORKINGNA_DB_NAME", "workingnadb_dev")
+    workingna_admin_base_url: str = os.getenv(
+        "WORKINGNA_ADMIN_BASE_URL", "https://admin.workingna.com/cms/job-seeker"
+    )
+
+    # TverKar PostgreSQL Database Settings
+    tverkar_database_url: str = os.getenv(
+        "TVERKAR_DATABASE_URL", 
+        os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/tverkar")
+    )
+
+    # Google Sheets Integration
+    google_sheet_webhook_url: str = os.getenv("GOOGLE_SHEET_WEBHOOK_URL", "")
+    google_sheet_url: str = os.getenv(
+        "GOOGLE_SHEET_URL", 
+        "https://docs.google.com/spreadsheets/d/1oOI6FGaXqfa_54vn7UV9FVLJrGTp3jmXRhJybYu5DfQ/edit?gid=1408716999#gid=1408716999"
+    )
+
     # TverKar Campaign Default Templates (Khmer)
     tverkar_initial_message: str = (
         "សួស្តីបង [ឈ្មោះបេក្ខជន] 👋\n\n"
@@ -58,8 +81,19 @@ class AppConfig:
             max_delay_seconds=int(os.getenv("MAX_DELAY_SECONDS", "2")),
             default_video_path=video_p,
             survey_timeout_seconds=int(os.getenv("SURVEY_TIMEOUT_SECONDS", "120")),
+            workingna_db_host=os.getenv("WORKINGNA_DB_HOST", "127.0.0.1"),
+            workingna_db_port=int(os.getenv("WORKINGNA_DB_PORT", "3306")),
+            workingna_db_user=os.getenv("WORKINGNA_DB_USER", "workingna"),
+            workingna_db_password=os.getenv("WORKINGNA_DB_PASSWORD", "Workingna#123"),
+            workingna_db_name=os.getenv("WORKINGNA_DB_NAME", "workingnadb_dev"),
+            workingna_admin_base_url=os.getenv("WORKINGNA_ADMIN_BASE_URL", "https://admin.workingna.com/cms/job-seeker"),
+            tverkar_database_url=os.getenv("TVERKAR_DATABASE_URL", os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/tverkar")),
+            google_sheet_webhook_url=os.getenv("GOOGLE_SHEET_WEBHOOK_URL", ""),
+            google_sheet_url=os.getenv(
+                "GOOGLE_SHEET_URL", 
+                "https://docs.google.com/spreadsheets/d/1oOI6FGaXqfa_54vn7UV9FVLJrGTp3jmXRhJybYu5DfQ/edit?gid=1408716999#gid=1408716999"
+            ),
         )
 
 
 config = AppConfig()
-

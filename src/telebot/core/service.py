@@ -51,6 +51,11 @@ class TelegramService:
         self._ensure_client()
         if not self.client.is_connected():
             await self.client.connect()
+        try:
+            from src.telebot.core.survey_manager import PersistentSurveyManager
+            PersistentSurveyManager.attach_event_listener(self.client)
+        except Exception as e:
+            logger.debug(f"Event listener attachment notice: {e}")
         return self.client
 
     async def is_authenticated(self) -> bool:
