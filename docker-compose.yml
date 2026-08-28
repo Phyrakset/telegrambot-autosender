@@ -1,0 +1,19 @@
+services:
+  telebot-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telebot_app
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./.env:/app/.env
+      - ./telebot_session.session:/app/telebot_session.session
+      - ./tverkar_campaign_results.csv:/app/tverkar_campaign_results.csv
+      - ./all_Phone_barstar_service_cashair.xlsx:/app/all_Phone_barstar_service_cashair.xlsx
+      - ./video:/app/video
+      - ./voice_records:/app/voice_records
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Phnom_Penh

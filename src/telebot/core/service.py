@@ -3,10 +3,8 @@ import sys
 import asyncio
 import logging
 from typing import Optional, Dict, Any, Tuple
-from dotenv import load_dotenv
 from telethon import TelegramClient, functions, types, errors, custom
-
-load_dotenv()
+from src.telebot.config import config, AppConfig
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -18,54 +16,49 @@ class TelegramService:
     _instance: Optional["TelegramService"] = None
 
     def __new__(cls, *args, **kwargs):
-        # Singleton pattern to reuse the connected client session across UI & background tasks
         if cls._instance is None:
             cls._instance = super(TelegramService, cls).__new__(cls)
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, session_name: str = "telebot_session"):
+    def __init__(self, session_name: Optional[str] = None):
         if getattr(self, "_initialized", False):
             return
-        self.api_id = os.getenv("TELEGRAM_API_ID")
-        self.api_hash = os.getenv("TELEGRAM_API_HASH")
-        self.phone = os.getenv("TELEGRAM_PHONE")
-        self.session_name = session_name
+        self.cfg = AppConfig.reload()
+        self.session_name = session_name or self.cfg.session_name
         self.client: Optional[TelegramClient] = None
         self.phone_code_hash: Optional[str] = None
         self.pending_phone: Optional[str] = None
-        self.is_stopping: bool = False
         self._media_cache: Dict[str, Any] = {}
         self._initialized = True
 
     def reload_env(self):
-        """Reloads credentials from .env file."""
-        load_dotenv(override=True)
-        self.api_id = os.getenv("TELEGRAM_API_ID")
-        self.api_hash = os.getenv("TELEGRAM_API_HASH")
-        self.phone = os.getenv("TELEGRAM_PHONE")
+        self.cfg = AppConfig.reload()
 
     def _ensure_client(self):
         self.reload_env()
-        if not self.api_id or not self.api_hash:
+        if not self.cfg.api_id or not self.cfg.api_hash:
             raise ValueError("TELEGRAM_API_ID or TELEGRAM_API_HASH is missing. Please configure .env.")
         try:
-            numeric_api_id = int(str(self.api_id).strip())
+            numeric_api_id = int(str(self.cfg.api_id).strip())
         except ValueError:
             raise ValueError("TELEGRAM_API_ID must be a numeric integer.")
 
         if not self.client:
-            self.client = TelegramClient(self.session_name, numeric_api_id, str(self.api_hash).strip())
+            self.client = TelegramClient(self.session_name, numeric_api_id, str(self.cfg.api_hash).strip())
 
     async def connect(self):
-        """Initializes and connects the MTProto client session."""
         self._ensure_client()
         if not self.client.is_connected():
             await self.client.connect()
+        try:
+            from src.telebot.core.survey_manager import PersistentSurveyManager
+            PersistentSurveyManager.attach_event_listener(self.client)
+        except Exception as e:
+            logger.debug(f"Event listener attachment notice: {e}")
         return self.client
 
     async def is_authenticated(self) -> bool:
-        """Checks if the client session is currently authorized."""
         try:
             await self.connect()
             return await self.client.is_user_authorized()
@@ -73,7 +66,6 @@ class TelegramService:
             return False
 
     async def get_me_info(self) -> Optional[Dict[str, Any]]:
-        """Returns details about the logged-in Telegram user."""
         if not await self.is_authenticated():
             return None
         me = await self.client.get_me()
@@ -87,7 +79,6 @@ class TelegramService:
         }
 
     async def send_auth_code(self, phone: str) -> Tuple[bool, str]:
-        """Sends an authentication code to the specified phone number via Telegram."""
         await self.connect()
         clean_phone = phone.strip()
         try:
@@ -99,10 +90,6 @@ class TelegramService:
             return False, f"Failed to send code: {str(e)}"
 
     async def sign_in_with_code(self, code: str, password: Optional[str] = None) -> Tuple[bool, str, bool]:
-        """
-        Signs in with received code.
-        Returns: (success: bool, message: str, needs_password: bool)
-        """
         if not self.pending_phone or not self.phone_code_hash:
             return False, "No pending login found. Request verification code first.", False
         
@@ -123,7 +110,6 @@ class TelegramService:
             return False, f"Sign-in failed: {str(e)}", False
 
     async def sign_in_with_password(self, password: str) -> Tuple[bool, str, bool]:
-        """Signs in with 2FA password."""
         await self.connect()
         try:
             await self.client.sign_in(password=password.strip())
@@ -133,12 +119,11 @@ class TelegramService:
             return False, f"2FA verification failed: {str(e)}", True
 
     async def delete_contact(self, user_id: int):
-        """Safely removes an imported temporary contact from Telegram contacts."""
         try:
             if self.client and self.client.is_connected():
                 await self.client(functions.contacts.DeleteContactsRequest(id=[types.InputUser(user_id=user_id, access_hash=0)]))
         except Exception as e:
-            logger.debug(f"Contact cleanup exception (ignored): {e}")
+            logger.debug(f"Contact cleanup notice (ignored): {e}")
 
     async def check_phone_registration(
         self, 
@@ -204,7 +189,7 @@ class TelegramService:
         buttons: Any = None
     ) -> Tuple[bool, str, str]:
         """
-        Sends a direct message to a resolved Telegram user entity with optional keyboard buttons.
+        Sends a direct message to a resolved Telegram user entity with optional buttons.
         Returns: (success: bool, status_type: str, details_or_msg_id: str)
         status_type can be: 'DELIVERED', 'PRIVACY_RESTRICTED', 'DEACTIVATED', 'FLOOD_LIMIT', 'ERROR'
         """
@@ -289,6 +274,8 @@ class TelegramService:
             return False, "FLOOD_WAIT", f"FloodWait: required wait {e.seconds}s"
         except Exception as e:
             return False, "ERROR", str(e)
+
+
 
     async def conduct_tverkar_campaign_session(
         self,
@@ -450,6 +437,7 @@ class TelegramService:
                     answers["raw_dialogue"].append(f"User (Salary): {ansb2_text}")
                     answers["expected_salary"] = ansb2_text
 
+                    # Sub-branch B3: Preferred Location
                     qb3_msg = (
                         "• សុំប្រាប់ទីតាំងដែលអាចធ្វេីការបាន ថ្ងៃក្រោយពេលបងចង់ផ្លាស់ប្តូរ ងាយស្រួលរកតែម្តង ៖\n"
                         "👉 (ឧទាហរណ៍៖ ភ្នំពេញ, ទួលគោក, សៀមរាប...)"
@@ -460,6 +448,7 @@ class TelegramService:
                     answers["raw_dialogue"].append(f"User (Location): {ansb3_text}")
                     answers["preferred_location"] = ansb3_text
 
+                # Final wrap-up / thank you message
                 wrapup_msg = (
                     "🙏 អរគុណច្រើនបង! ព័ត៌មានរបស់បងត្រូវបានកត់ត្រាទុកក្នុងប្រព័ន្ធ TverKar រួចរាល់។\n"
                     "ក្រុមការងារយើងនឹងជូនដំណឹងនៅពេលមានឱកាសការងារល្អៗជូនបង!"
@@ -486,6 +475,7 @@ class TelegramService:
         username = f"@{user_info.get('username')}" if (user_info and user_info.get("username")) else ""
         
         msg = template
+        # Replace placeholders for Khmer and standard formats
         msg = msg.replace("[ឈ្មោះបេក្ខជន]", disp_name)
         msg = msg.replace("{name}", disp_name)
         msg = msg.replace("{candidate_name}", disp_name)
@@ -495,5 +485,4 @@ class TelegramService:
     async def disconnect(self):
         if self.client and self.client.is_connected():
             await self.client.disconnect()
-
 

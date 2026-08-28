@@ -28,12 +28,19 @@ htmlcov/
 phone-list.txt
 check_results.json
 auto_send_results.json
+*.csv
 *.log
+voice_records/
+video/*_backup.mp4
+!video/TverKar&WN_720p_crf30.mp4
 
 # Editor & OS Metadata
 .vscode/
 .idea/
 *.swp
 *.swo
+*.lock
+~$*
 .DS_Store
 Thumbs.db
+
