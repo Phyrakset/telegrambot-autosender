@@ -527,7 +527,12 @@ async def execute_batch(
             df.at[idx, "Workingna Admin URL"] = admin_url
 
         try:
-            is_reg, info, user_entity = await service.check_phone_registration(e164, cleanup_contact=False)
+            is_reg, info, user_entity = await service.check_phone_registration(
+                phone_e164=e164, 
+                candidate_name=known_name, 
+                workingna_profile=workingna_profile,
+                cleanup_contact=False
+            )
             if is_reg and info:
                 stats["registered"] += 1
                 full_n = f"{info.get('first_name', '')} {info.get('last_name', '')}".strip()
@@ -662,6 +667,7 @@ def build_app():
                                 )
 
                             with gr.Row():
+                                btn_load_test = gr.Button("🧪 4 Test Numbers", size="sm", scale=1, variant="secondary")
                                 btn_preset_25 = gr.Button("25", size="sm", scale=1)
                                 btn_preset_50 = gr.Button("50", size="sm", scale=1)
                                 btn_preset_100 = gr.Button("100", size="sm", scale=1)
@@ -741,6 +747,7 @@ def build_app():
                 )
 
                 # Preset buttons
+                btn_load_test.click(fn=get_default_phone_list, outputs=[phone_input])
                 btn_preset_25.click(fn=lambda m, o: filter_excel_candidates(m, 25, o), inputs=[filter_mode, offset_input], outputs=[phone_input, db_stats_badge])
                 btn_preset_50.click(fn=lambda m, o: filter_excel_candidates(m, 50, o), inputs=[filter_mode, offset_input], outputs=[phone_input, db_stats_badge])
                 btn_preset_100.click(fn=lambda m, o: filter_excel_candidates(m, 100, o), inputs=[filter_mode, offset_input], outputs=[phone_input, db_stats_badge])

@@ -56,9 +56,21 @@ function doPost(e) {
       "TverKar Worker ID"
     ];
     
-    // Auto-create header row if sheet is empty
+    // Auto-create or ensure header row names are populated
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(headers);
+    } else {
+      var currentHeaders = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+      var needsUpdate = false;
+      for (var hIdx = 0; hIdx < headers.length; hIdx++) {
+        if (!currentHeaders[hIdx] || currentHeaders[hIdx].toString().trim() === "") {
+          currentHeaders[hIdx] = headers[hIdx];
+          needsUpdate = true;
+        }
+      }
+      if (needsUpdate) {
+        sheet.getRange(1, 1, 1, headers.length).setValues([currentHeaders]);
+      }
     }
     
     if (data.action === "bulk" && Array.isArray(data.rows)) {

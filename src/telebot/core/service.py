@@ -128,50 +128,27 @@ class TelegramService:
     async def check_phone_registration(
         self, 
         phone_e164: str, 
-        cleanup_contact: bool = True
+        candidate_name: Optional[str] = None,
+        workingna_profile: Optional[Dict[str, Any]] = None,
+        cleanup_contact: bool = False
     ) -> Tuple[bool, Optional[Dict[str, Any]], Optional[Any]]:
         """
-        Checks whether a phone number is registered on Telegram.
+        Checks whether a phone number is registered on Telegram using hybrid resolution.
         Returns: (is_registered, user_info_dict, user_entity)
         """
         await self.connect()
         if not await self.client.is_user_authorized():
             raise RuntimeError("Telegram session is not authorized. Please log in first.")
 
-        contact = types.InputPhoneContact(
-            client_id=0,
-            phone=phone_e164,
-            first_name="",
-            last_name=""
-        )
-
         try:
-            result = await self.client(functions.contacts.ImportContactsRequest([contact]))
-            if result.users:
-                user = result.users[0]
-                
-                # Fetch genuine Telegram user profile information
-                user_info = {
-                    "id": user.id,
-                    "first_name": user.first_name or "",
-                    "last_name": user.last_name or "",
-                    "username": user.username or "",
-                    "phone": user.phone or phone_e164,
-                    "is_bot": getattr(user, "bot", False),
-                    "is_deleted": getattr(user, "deleted", False),
-                    "status": type(user.status).__name__ if user.status else "Unknown"
-                }
-
-                if cleanup_contact:
-                    try:
-                        await self.client(functions.contacts.DeleteContactsRequest(id=[user.id]))
-                    except Exception as e:
-                        logger.debug(f"Contact cleanup notice: {e}")
-
-                return True, user_info, user
-            else:
-                return False, None, None
-
+            from src.telebot.core.resolver import CandidateDirectoryResolver
+            return await CandidateDirectoryResolver.resolve_candidate(
+                client=self.client,
+                phone_e164=phone_e164,
+                candidate_name=candidate_name,
+                workingna_profile=workingna_profile,
+                cleanup_contact=cleanup_contact
+            )
         except errors.FloodWaitError as e:
             logger.warning(f"Telegram FloodWait: Required to wait {e.seconds} seconds.")
             raise e
