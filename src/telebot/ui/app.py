@@ -217,15 +217,8 @@ def load_excel_phone_list(limit: Optional[int] = 100) -> str:
     return text
 
 def get_default_phone_list() -> str:
-    excel_path = "all_Phone_barstar_service_cashair.xlsx"
-    if os.path.exists(excel_path):
-        text, _ = filter_excel_candidates("📁 All Numbers in Excel (Original Row Order)", batch_size=100, offset=0)
-        return text
-    for candidate in ["phone-list.txt", "phone-list.example.txt"]:
-        if os.path.exists(candidate):
-            with open(candidate, "r", encoding="utf-8") as f:
-                return f.read().strip()
-    return ""
+    test_numbers = ["+85569532272", "+855968271451", "+85592342252", "+855183910978"]
+    return "\n".join(test_numbers)
 
 def load_candidates_from_workingna_db(limit: int, only_looking: bool, search: str) -> str:
     """Helper to query Workingna DB and return newline-separated phone numbers."""
@@ -662,6 +655,7 @@ def build_app():
                                 )
 
                             with gr.Row():
+                                btn_load_test = gr.Button("🧪 4 Test Numbers", size="sm", scale=1, variant="secondary")
                                 btn_preset_25 = gr.Button("25", size="sm", scale=1)
                                 btn_preset_50 = gr.Button("50", size="sm", scale=1)
                                 btn_preset_100 = gr.Button("100", size="sm", scale=1)
@@ -741,6 +735,7 @@ def build_app():
                 )
 
                 # Preset buttons
+                btn_load_test.click(fn=get_default_phone_list, outputs=[phone_input])
                 btn_preset_25.click(fn=lambda m, o: filter_excel_candidates(m, 25, o), inputs=[filter_mode, offset_input], outputs=[phone_input, db_stats_badge])
                 btn_preset_50.click(fn=lambda m, o: filter_excel_candidates(m, 50, o), inputs=[filter_mode, offset_input], outputs=[phone_input, db_stats_badge])
                 btn_preset_100.click(fn=lambda m, o: filter_excel_candidates(m, 100, o), inputs=[filter_mode, offset_input], outputs=[phone_input, db_stats_badge])
